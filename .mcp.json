@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "galaxy": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["galaxy-mcp"],
+      "env": {
+        "GALAXY_URL": "${GALAXY_URL}",
+        "GALAXY_API_KEY": "${GALAXY_API_KEY}"
+      }
+    }
+  }
+}
