@@ -22,7 +22,7 @@ These six skills carry `disable-model-invocation: true`, which means they do **n
 
 ## Default workflow when given a Galaxy task
 
-1. **Confirm MCP is connected.** If the first call fails with an auth error, call `connect(url=$GALAXY_URL, api_key=$GALAXY_API_KEY)`, then retry. If env vars are missing, surface that clearly and stop.
+1. **Confirm MCP is connected.** Just call the first tool the task needs (e.g. `mcp__galaxy__get_user`). The MCP server is preconfigured with credentials by the plugin's launcher (`bin/galaxy-mcp-launcher.sh`), which reads from the shell env first and falls back to `${CLAUDE_PLUGIN_DATA}/galaxy.env`. If a call fails with auth/401, tell the user to run `/galaxy:galaxy-setup` to re-enter the key — do **not** read `$GALAXY_URL` / `$GALAXY_API_KEY` from your own shell.
 2. **Load the right skills for the task at hand.** Don't preload all six. A typical run-a-tool task needs `galaxy-tool-execution` and `galaxy-histories-and-data`; add `galaxy-collections` only if a collection is involved; add `galaxy-workflows` only if importing/running an IWC workflow.
 3. **Construct inputs correctly.** Before every first-time `run_tool` call on a tool, call `get_tool_details(tool_id, io_details=True)` and `get_tool_run_examples(tool_id)`. Use `src: "hda"` for datasets, `src: "hdca"` for collections, and pipe-notation (`"how|filter_source"`) for conditional parameters. The tool-execution skill has the patterns.
 4. **Poll jobs.** After `run_tool`, poll `get_job_details(dataset_id)` every 30 seconds. Surface state transitions (`new` → `queued` → `running` → `ok`/`error`) to the parent with timestamps. Hard timeout: 60 minutes per tool — report the job ID and stop rather than retry blindly.
