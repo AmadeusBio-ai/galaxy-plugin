@@ -1,6 +1,6 @@
 ---
 name: galaxy-workflows
-description: Find, import, and run Galaxy workflows — search the IWC (Intergalactic Workflow Commission) registry by topic, import an IWC workflow into the user's account, list the user's own workflows, inspect a workflow's step structure, invoke a workflow with mapped inputs, and monitor an invocation. Use this whenever the user says "is there a workflow for X", "import the IWC workflow", "run a workflow", "invocation", or whenever an analysis would require chaining more than ~3 Galaxy tools sequentially.
+description: Find, import, and run Galaxy workflows — search the IWC (Intergalactic Workflow Commission) registry by topic, import an IWC workflow into the user's account, list the user's own workflows, inspect a workflow's step structure, invoke a workflow with mapped inputs, and monitor an invocation. Use this whenever the user says "is there a workflow for X", "import the IWC workflow", "run a workflow", "invocation", or whenever an analysis would require chaining more than 2 Galaxy tools sequentially.
 disable-model-invocation: true
 ---
 
@@ -15,7 +15,7 @@ When an analysis is more than a handful of tools, a workflow is almost always be
 - "Run my Variant Calling workflow on these inputs"
 - "Show me the steps of workflow X"
 - "What's the status of invocation Y?"
-- Heuristic: if you're about to chain more than ~3 `run_tool` calls, stop and check IWC first.
+- Heuristic: if you're about to chain more than 2 `run_tool` calls (e.g., "Trim, Align, then Count"), stop and check IWC first.
 
 **Not for**: ad-hoc single-tool runs (`galaxy-tool-execution`), authoring new workflows from scratch (use the Galaxy UI — no MCP tool exposes the workflow editor), tool-shed workflow installation.
 
@@ -29,7 +29,7 @@ When an analysis is more than a handful of tools, a workflow is almost always be
 
 ### 1. Find an existing workflow
 
-```
+```python
 # IWC (curated, public)
 search_iwc_workflows(query="rna-seq counts")
 get_iwc_workflows()                       # full manifest if you need to browse
@@ -38,31 +38,34 @@ get_iwc_workflows()                       # full manifest if you need to browse
 list_workflows(published=True)            # public on this Galaxy instance
 list_workflows()                          # the user's own
 list_workflows(name="Variant Calling")    # partial, case-insensitive
+
 ```
 
 Prefer IWC over the user's private workflows for reproducibility (IWC workflows are versioned and tested).
 
 ### 2. Import an IWC workflow into the user's account
 
-```
-import_workflow_from_iwc(trs_id="#workflow/github.com/iwc-workflows/rnaseq-pe/main")
+```python
+import_workflow_from_iwc(trs_id="#workflow/[github.com/iwc-workflows/rnaseq-pe/main](https://github.com/iwc-workflows/rnaseq-pe/main)")
 # Returns a workflow_id under the user's account
+
 ```
 
 You only need to import once per Galaxy account — subsequent runs reuse the imported workflow.
 
 ### 3. Inspect the workflow's input steps
 
-```
+```python
 details = get_workflow_details(workflow_id=W)
 # details["steps"] enumerates each step; input steps have type "data_input" or "data_collection_input"
+
 ```
 
 You need the **step index** (a string, "0", "1", …) for every input you'll map. The step index is the key in the `inputs` dict you'll pass to `invoke_workflow`.
 
 ### 4. Invoke
 
-```
+```python
 invoke_workflow(
     workflow_id=W,
     history_id=H,
@@ -76,24 +79,27 @@ invoke_workflow(
     },
 )
 # Returns an invocation object with an invocation_id.
+
 ```
 
 ### 5. Monitor the invocation
 
-```
+```python
 inv = get_invocations(invocation_id=I)
 # inv["state"]: "new" → "scheduled" → "ready" → "scheduled" → "done"
 # inv["steps"]: per-step state and job IDs
 
 # For each running step, poll the underlying job via get_job_details on its output datasets.
+
 ```
 
 Workflow invocations have their own state machine layered on top of per-step job states — a workflow can be `scheduled` while individual steps are still `queued`. Treat invocation `state: "scheduled"` as "in progress, keep polling".
 
 ### 6. Cancel if needed
 
-```
+```python
 cancel_workflow_invocation(invocation_id=I)
+
 ```
 
 ## Critical patterns
@@ -111,6 +117,7 @@ inputs = {
 inputs = {
     "input_fastq": {"id": fastq_id, "src": "hda"},
 }
+
 ```
 
 Use `get_workflow_details` to map names → step indices before invoking.
@@ -121,16 +128,25 @@ Same convention as `run_tool`:
 
 ```python
 {"2": {"id": collection_id, "src": "hdca"}}
+
 ```
 
-### Prefer IWC over composing manually when steps > 3
+### Prefer IWC over composing manually when steps > 2
 
 Manually chained `run_tool` calls are:
-- Not reproducible by anyone but you.
-- Not extractable to a workflow without rework.
-- More likely to have wrong input-shape bugs (each tool call is a fresh chance to get pipe-notation wrong).
+
+* Not reproducible by anyone but you.
+* Not extractable to a workflow without rework.
+* More likely to have wrong input-shape bugs (each tool call is a fresh chance to get pipe-notation wrong).
 
 A single `invoke_workflow` call against an IWC workflow has none of these issues.
+
+## Phase 4: Macro-Execution (Protocols)
+
+When the user specifies the `/galaxy-run-protocol` command or asks to execute a specific pipeline of tools without a pre-existing workflow, treat the request as a **Protocol**.
+
+* A Protocol is a single compiled pipeline meant to be executed with minimal context roundtrips.
+* You should map outputs from one tool directly to the inputs of the next, polling intermediate jobs and advancing the pipeline automatically without pausing to ask the user for permission between successful steps.
 
 ## Gotchas
 
@@ -140,7 +156,7 @@ A single `invoke_workflow` call against an IWC workflow has none of these issues
 
 ## Example — import the IWC RNA-seq workflow and run it
 
-```
+```python
 # 1) Find
 hits = search_iwc_workflows(query="rna-seq")
 trs_id = hits[0]["trs_id"]   # e.g. "#workflow/github.com/iwc-workflows/rnaseq-pe-counts/main"
@@ -165,5 +181,4 @@ inv = invoke_workflow(
 invocation_id = inv["id"]
 
 # 5) Poll get_invocations(invocation_id=invocation_id) every 30s until state == "done".
-#    Then check each step for "error" state and surface any failures.
-```
+#    Then check each step for "error" state and surface any failures.ilures.

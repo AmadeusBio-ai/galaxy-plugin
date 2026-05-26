@@ -2,6 +2,8 @@
 
 The MCP server is happy to hand you huge responses. Most of the bytes are noise. Four patterns below cover the biggest token sinks; following them tends to halve the context spend of a typical Galaxy run.
 
+**CRITICAL CONTEXT RULE:** Reading more than 50KB of tool metadata into your context window is a failure. If a tool schema dump or metadata response is large enough to be auto-saved to a file, you MUST NOT read the whole file into context. You MUST use targeted `jq` queries on the saved result file to extract only what you need.
+
 ## 1. `get_tool_details` for tools with built-in reference indices
 
 **Symptom:** the response runs hundreds of KB and gets auto-saved to a file with a "result exceeds maximum allowed tokens" error.
@@ -10,21 +12,53 @@ The MCP server is happy to hand you huge responses. Most of the bytes are noise.
 
 **Fix — prefer `get_tool_run_examples` first:**
 
-```
+```python
 examples = get_tool_run_examples(tool_id=TOOL)
 # Read one example dict. It shows the conditional structure (pipe-notation keys),
 # the source-kind wrappers ("src": "hda"), and which params are required.
 # 95% of the time this is enough to write the inputs dict.
+
 ```
 
-**Fix — when you really need the schema, query the saved file with `jq`:**
+**Fix — Tiered Tool Information Retrieval ("Signature-Only" check):**
 
-If `get_tool_details` did dump to a file, run targeted queries instead of reading the whole thing:
+Instead of reading the full tool details, introduce a "Signature-Only" check. Use a `jq` command to extract a high-level signature (just the input names, types, and whether they are required) directly from the cached tool schema file.
 
 ```bash
-# List top-level input names:
-jq '[.data.inputs[].name]' <path>
+# Extract high-level signature without the options/metadata bloat
+jq '.data.inputs | map({name, type, optional})' <path>
 
+```
+
+**Fix — Truncate Parameter Enumerations (The "Genome List" Fix):**
+
+You are **explicitly forbidden** from reading the `options` array for common reference-index pickers (Bowtie2, BWA, etc.) into your context.
+
+Instead, "guess" the value based on standard dataset namespaces (e.g., `hg38`, `mm10`, `dm6`). You don't need to enumerate the options to know the dbkey. Set it directly:
+
+```python
+inputs = {
+    "reference_genome|source": "indexed",
+    "reference_genome|index":  "hg38",
+}
+
+```
+
+If the server doesn't have that index cached, `run_tool` fails with a clear error — much cheaper than a 500 KB schema dump up-front.
+
+If you absolutely must inspect the parameter schema to know its exact name or structure, use `jq` to extract the parameter's basic information while **explicitly discarding** the options array:
+
+```bash
+# Pull just the parameter name, type, and default (discards the massive options array):
+jq '.data.inputs | .. | objects | select(.name=="index") | {name, type, default: .value}' <path>
+
+```
+
+**Fix — targeted `jq` queries for deep conditionals:**
+
+If you need deeper structure beyond the signature, query the saved file specifically instead of reading it:
+
+```bash
 # Inspect one conditional's structure (cases + their test_param):
 jq '.data.inputs | map(select(.name=="library")) | .[0]
     | {name, test_param: .test_param.name,
@@ -33,25 +67,7 @@ jq '.data.inputs | map(select(.name=="library")) | .[0]
 # Find a specific parameter (e.g., save_mapping_stats):
 jq '.data.inputs | .. | objects | select(.name=="save_mapping_stats")' <path>
 
-# Pull just the picker name for a select param (without the full options list):
-jq '.data.inputs | .. | objects | select(.name=="index")
-    | {name, default: .value}' <path>
 ```
-
-The `jq` calls return tens of bytes instead of hundreds of KB. Build the inputs dict from those.
-
-**Fix — pick the index by name without inspecting the options list:**
-
-For Bowtie2-family tools, the dbkey value (e.g., `hg38`, `mm10`, `dm6`) is the picker value. You don't need to enumerate the options to know it. Set:
-
-```python
-inputs = {
-    "reference_genome|source": "indexed",
-    "reference_genome|index":  "hg38",
-}
-```
-
-If the server doesn't have that index cached, `run_tool` fails with a clear error — much cheaper than a 500 KB schema dump up-front.
 
 ## 2. `search_tools_by_name` — take the top hit
 
@@ -61,13 +77,14 @@ If the server doesn't have that index cached, `run_tool` fails with a clear erro
 
 **Fix:**
 
-- The first hit is usually what you want — Galaxy returns the most-recent revision of the most-popular tool first.
-- If the search is ambiguous, switch to `search_tools_by_keywords` with two specific terms (`["bowtie2", "alignment"]` filters out the QIIME2 wrappers).
-- Don't read past the first 2-3 hits — pick or refine the query.
+* The first hit is usually what you want — Galaxy returns the most-recent revision of the most-popular tool first.
+* If the search is ambiguous, switch to `search_tools_by_keywords` with two specific terms (`["bowtie2", "alignment"]` filters out the QIIME2 wrappers).
+* Don't read past the first 2-3 hits — pick or refine the query.
 
-```
+```python
 hits = search_tools_by_name(query="<tool>")
 tool_id = hits[0]["id"]   # full ToolShed id with latest version
+
 ```
 
 If you've used the same tool before in this conversation, skip the search entirely and reuse the id.
@@ -82,10 +99,11 @@ The MCP server has Galaxy credentials. The agent's shell does not — `$GALAXY_U
 
 **Correct:**
 
-```
+```python
 get_dataset_details(dataset_id=D, include_preview=False)
 # or
 get_job_details(dataset_id=D)
+
 ```
 
 ### 3b. Don't include the preview in polling iterations
@@ -100,15 +118,16 @@ state = get_dataset_details(dataset_id=D, include_preview=False)["state"]
 
 # Once state == "ok" — ONE preview, with bounded preview_lines:
 preview = get_dataset_details(dataset_id=D, include_preview=True, preview_lines=15)
+
 ```
 
 ### 3c. Long jobs — use `ScheduleWakeup`, not busy loops
 
 For anything > 2 minutes expected runtime (aligners, large counts, big workflows), schedule a single wakeup instead of polling continuously. Pick the delay based on expected runtime:
 
-- Expected < 5 min: `ScheduleWakeup(delaySeconds=270)` (stays in cache TTL)
-- Expected 5-30 min: `ScheduleWakeup(delaySeconds=1200)` (one cache miss buys a long wait)
-- Expected > 30 min: `ScheduleWakeup(delaySeconds=1800)` and accept the cache miss
+* Expected < 5 min: `ScheduleWakeup(delaySeconds=270)` (stays in cache TTL)
+* Expected 5-30 min: `ScheduleWakeup(delaySeconds=1200)` (one cache miss buys a long wait)
+* Expected > 30 min: `ScheduleWakeup(delaySeconds=1800)` and accept the cache miss
 
 On wake, do one MCP poll. If still running, schedule another wakeup. This burns ~1 cache miss per check instead of N polls × full BAM details.
 
@@ -116,9 +135,9 @@ On wake, do one MCP poll. If still running, schedule another wakeup. This burns 
 
 Within a single agent turn / context window:
 
-- A tool's schema doesn't change. Fetch once, reuse.
-- A dataset's `id` and `extension` don't change. Fetch once, reuse.
-- An upload's URL→dataset mapping doesn't change. Don't re-upload to "be safe".
+* A tool's schema doesn't change. Fetch once, reuse.
+* A dataset's `id` and `extension` don't change. Fetch once, reuse.
+* An upload's URL→dataset mapping doesn't change. Don't re-upload to "be safe".
 
 Galaxy de-duplicates `run_tool` submissions against the same inputs (returns the existing dataset rather than queuing a new job). This is a feature — exploit it to make re-runs cheap, but it also means a polling call against the dataset id you already have is the right call, not a fresh `run_tool`.
 
@@ -126,8 +145,9 @@ Galaxy de-duplicates `run_tool` submissions against the same inputs (returns the
 
 Before any large MCP call, ask:
 
-- Is this an aligner / index-picker tool? → examples first, not full details
-- Have I already searched for this tool this turn? → reuse the id
-- Am I in a polling loop? → `include_preview=False`
-- Am I about to `curl` Galaxy? → stop, use the MCP
-- Is this a long job? → `ScheduleWakeup`, not a tight loop
+* Is this an aligner / index-picker tool? → examples first, not full details. If you must inspect, use Signature-Only `jq` extraction.
+* Am I about to load >50KB of metadata into context? → Stop, use `jq`.
+* Have I already searched for this tool this turn? → reuse the id.
+* Am I in a polling loop? → `include_preview=False`.
+* Am I about to `curl` Galaxy? → stop, use the MCP.
+* Is this a long job? → `ScheduleWakeup`, not a tight loop.

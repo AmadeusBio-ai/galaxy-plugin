@@ -9,10 +9,11 @@ new → queued → running → ok
                        ↘ error
                        ↘ deleted
                        ↘ paused
+
 ```
 
 | State | Meaning | Action |
-|---|---|---|
+| --- | --- | --- |
 | `new` | Galaxy accepted the request, hasn't queued yet | Keep polling |
 | `queued` | Waiting for a slot on the cluster | Keep polling (this can be the longest phase) |
 | `running` | Executing | Keep polling |
@@ -23,9 +24,10 @@ new → queued → running → ok
 
 ## Polling cadence
 
-- **Every 30 seconds** after kicking off `run_tool`. Don't poll faster — usegalaxy.org will rate-limit, and it doesn't give you anything (state transitions don't happen sub-30s for most tools).
-- **Surface every state transition** to the parent with a timestamp. The wait should be visible, not silent — users panic when nothing happens for 10 minutes.
-- **Hard timeout: 60 minutes per tool.** If a job hasn't reached a terminal state in an hour, report the `job_id` and stop. Do **not** retry blindly — re-submitting a job that's stuck because of an input problem just creates a second stuck job.
+* **Simulated Blocking Wait via ScheduleWakeup:** Do *not* poll continuously every 30 seconds. Instead, calculate an "expected time to completion" for the specific tool (e.g., 5 mins for an alignment) and use `ScheduleWakeup(delaySeconds=300)`.
+* **Resume Polling:** You should only resume your polling loop to check the job state *after* the wakeup triggers, effectively moving the "waiting" logic out of the immediate LLM context window. If the job is still `queued` or `running`, calculate the remaining time and schedule another wakeup.
+* **Surface every state transition** to the parent with a timestamp. The wait should be visible, not silent — users panic when nothing happens for 10 minutes.
+* **Hard timeout: 60 minutes per tool.** If a job hasn't reached a terminal state in an hour, report the `job_id` and stop. Do **not** retry blindly — re-submitting a job that's stuck because of an input problem just creates a second stuck job.
 
 ## Reading `stderr` after an error
 
@@ -35,6 +37,7 @@ job = get_job_details(dataset_id=D)
 # job["stderr"] contains the tool's actual error output
 # job["stdout"] sometimes has useful context
 # job["command_line"] shows exactly what Galaxy invoked
+
 ```
 
 `stderr` is usually a couple lines of the tool's complaint plus a Python/Java traceback. The first line of the tool's complaint is almost always the real problem — read that, not the traceback.

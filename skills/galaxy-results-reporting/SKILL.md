@@ -22,39 +22,59 @@ The closing-out skill. After a pipeline finishes, the user usually wants two thi
 
 - All upstream jobs in the history have reached `ok`.
 - You know the `history_id` you're publishing.
-- For the BioBlend fallback: `bioblend` installed in the active Python environment and `GALAXY_URL` / `GALAXY_API_KEY` in env.
+- For pseudo-native publishing: `bioblend` installed in the active Python environment and `GALAXY_URL` / `GALAXY_API_KEY` in env.
 
 ## Workflow
 
 ### 1. Publishing the history (CONFIRM FIRST)
 
-The galaxy-mcp server **does not currently expose** `share_history` or `publish_history` as native tools. Publishing is a public-surface action; do NOT publish unless the user explicitly asked, or you have confirmed.
+While native history management is being exposed in the MCP server, use the robust pseudo-native publishing script. Publishing is a public-surface action; do NOT publish unless the user explicitly asked, or you have confirmed.
 
-When publishing is authorized, the BioBlend fallback is:
+When publishing is authorized, execute this pseudo-native command via the `Bash` tool:
 
 ```python
 # bioblend_publish.py — run via Bash
 import os
 from bioblend.galaxy import GalaxyInstance
 
-gi = GalaxyInstance(url=os.environ["GALAXY_URL"], key=os.environ["GALAXY_API_KEY"])
+# 1. Multi-host robustness: cleanly handle trailing slashes and missing vars
+galaxy_url = os.environ.get("GALAXY_URL", "").rstrip("/")
+api_key = os.environ.get("GALAXY_API_KEY")
+
+if not galaxy_url or not api_key:
+    print("ERROR: GALAXY_URL or GALAXY_API_KEY missing from environment.")
+    exit(1)
+
+gi = GalaxyInstance(url=galaxy_url, key=api_key)
+
+# 2. Native Intent: Update the history to published and importable
 hist = gi.histories.update_history(history_id, published=True, importable=True)
-slug = hist.get("slug") or hist.get("username_and_slug", "").split("/")[-1]
-username = gi.users.get_current_user()["username"]
-host = os.environ["GALAXY_URL"].rstrip("/")
-print(f"{host}/u/{username}/h/{slug}")
+
+# 3. Robust slug extraction: handle missing slugs cleanly
+slug = hist.get("slug")
+if not slug:
+    user_and_slug = hist.get("username_and_slug", "")
+    slug = user_and_slug.split("/")[-1] if user_and_slug else str(history_id)
+
+# 4. URL Resolution
+user_info = gi.users.get_current_user()
+username = user_info.get("username", "unknown")
+
+share_url = f"{galaxy_url}/u/{username}/h/{slug}"
+print(share_url)
+
 ```
 
-Invoke via the `Bash` tool. Surface the URL to the parent verbatim — that's the artifact the user actually wanted. If `bioblend` isn't installed, tell the user the install command (`uv pip install bioblend` or `pip install bioblend`) and stop — do not silently skip the publish step.
+Surface the URL to the parent verbatim — that's the artifact the user actually wanted. If the script throws a missing module error, tell the user the install command (`uv pip install bioblend` or `pip install bioblend`) and stop — do not silently skip the publish step.
 
-Note: the agent's Bash environment may not see `GALAXY_URL` / `GALAXY_API_KEY` (the MCP launcher reads them, the agent's shell does not). If `os.environ["GALAXY_URL"]` is empty in the script, ask the user to either export the two vars in the shell that launched Claude, or to invoke `/galaxy-setup` to debug.
+Note: the agent's Bash environment may not see `GALAXY_URL` / `GALAXY_API_KEY` (the MCP launcher reads them, the agent's shell does not). If the script throws the environment variable error, ask the user to either export the two vars in the shell that launched Claude, or to invoke `/galaxy-setup` to debug.
 
 ### 2. Build a summary — shape depends on the pipeline
 
 There is no single template — pick metrics the user actually cares about for this analysis. Common shapes:
 
 | Pipeline | Useful metrics |
-|---|---|
+| --- | --- |
 | Read alignment | input read count, aligned read count, overall alignment rate, top contigs by depth |
 | RNA-seq quantification | input reads, post-trim reads, alignment rate, top-N expressed features |
 | ChIP-seq / ATAC-seq peak calling | input reads, mapped reads, peak count, top-N peaks by score |
@@ -71,6 +91,7 @@ stats = get_dataset_details(dataset_id=stats_id, include_preview=True, preview_l
 # A larger output table — download then process
 download_dataset(dataset_id=table_id, file_path="outputs/result.tsv")
 # Then use Bash with awk/sort/head, or Python with pandas, to extract top-N or summary rows.
+
 ```
 
 When the output is a count table from `htseq-count` or similar, drop the trailing summary rows (lines starting with `__`) before ranking — they have huge counts and dominate any naive sort.
@@ -81,6 +102,7 @@ Mirror the key outputs to a local `outputs/` directory so the user has offline c
 
 ```
 download_dataset(dataset_id=main_output_id, file_path="outputs/<descriptive-name>.<ext>")
+
 ```
 
 ### 4. Return a tidy summary to the parent
@@ -95,6 +117,7 @@ Outputs:
 - <metric 2>: <value>
 - top N: <short table>
 Saved locally: outputs/{<files>}
+
 ```
 
 Keep it short. Detailed previews go in the response only if asked.
@@ -102,20 +125,23 @@ Keep it short. Detailed previews go in the response only if asked.
 ## Critical patterns
 
 ### The share URL is the user's deliverable
+
 A pipeline that ran perfectly but produced no shareable link is, to the user, a failed run. If publishing fails (bioblend not installed, auth error), say so plainly — don't claim success.
 
 ### Drop htseq-count's `__` rows before "top genes"
+
 htseq-count's output ends with summary lines: `__no_feature`, `__ambiguous`, `__too_low_aQual`, `__not_aligned`, `__alignment_not_unique`. They have huge counts and will dominate any naive "top by count". Filter them out before sorting.
 
 ### Don't recompute summary metrics by hand
+
 Aligners and callers usually emit a stats / log dataset with the metric the user wants (overall alignment rate, peak count, called variants, contig N50). Parse that line instead of computing it from the primary output — formats can differ subtly and the user will trust the tool's own stats output.
 
 ## Gotchas
 
-1. **BioBlend fallback only works if `bioblend` is installed.** If `python -c "import bioblend"` fails, instruct the user to `pip install bioblend` (or `uv pip install bioblend`) and retry. Don't silently skip the publish step.
+1. **Pseudo-native publishing requires `bioblend`.** If `python -c "import bioblend"` fails, instruct the user to `pip install bioblend` (or `uv pip install bioblend`) and retry. Don't silently skip the publish step.
 2. **Always confirm before publishing.** "Published" / "importable" means anyone with the URL can view (and import) the history. If the user only said "give me a link", they probably want the private link to their own history (`/histories/view?id=<id>`), not a public share. When in doubt, ask.
-3. **The slug isn't the history name.** Galaxy lowercases and hyphenates the name for the URL slug. Use whatever BioBlend returns in `slug` rather than constructing it yourself.
-4. **The host comes from `GALAXY_URL`, not the hardcoded `usegalaxy.org`.** Some users run private Galaxy instances. Pull the host from the env / from the user's earlier `connect` response.
+3. **The slug isn't the history name.** Galaxy lowercases and hyphenates the name for the URL slug. Trust the pseudo-native script's extraction logic.
+4. **The host comes from `GALAXY_URL`, not the hardcoded `usegalaxy.org`.** Some users run private Galaxy instances. The robust script pulls the host cleanly from the environment.
 
 ## Example — close out a generic alignment-and-quantify pipeline
 
@@ -141,4 +167,3 @@ top10 = sorted(rows, key=lambda r: float(r[1]), reverse=True)[:10]
 download_dataset(dataset_id=table_id, file_path="outputs/<descriptive>.tsv")
 
 # 4) Return summary (see template above)
-```
