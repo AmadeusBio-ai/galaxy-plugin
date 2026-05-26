@@ -1,7 +1,7 @@
 {
   "name": "galaxy",
   "description": "Operate the Galaxy bioinformatics platform (usegalaxy.org and compatibles) from natural language — discover tools, run analyses, manage histories, monitor jobs, publish results.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": { "name": "lyangyilliu" },
   "license": "MIT",
   "mcpServers": {

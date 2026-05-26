@@ -54,7 +54,7 @@ Galaxy share URLs look like `usegalaxy.org/u/<user>/h/<slug>`. Slugs are lowerca
 To resolve a URL slug:
 
 ```python
-slug = "lab-7-1-2026-05-25"
+slug = "chip-seq-apr-2026-04-12"
 target_name = slug.replace("-", " ").lower()
 histories = list_history_ids()
 match = next(h for h in histories if h["name"].lower() == target_name)

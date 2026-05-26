@@ -10,11 +10,11 @@ The most-used skill in the plugin. Owns the discovery → invocation → monitor
 
 ## When to use
 
-- "Run Trimmomatic on my fastq with SLIDINGWINDOW 4/20"
-- "Find a tool for trimming Illumina adapters"
-- "Run Bowtie2 against hg38 and save the mapping stats"
+- "Run <tool> with these params on my dataset"
+- "Find a tool that does X" (adapter trimming, peak calling, variant calling, etc.)
+- "Run the aligner against <genome> and save the mapping stats"
 - "My job 4f3e… has been queued for 20 minutes — what's going on?"
-- "Why did htseq-count finish ok but produce a 0-byte counts file?" → first load `galaxy-mcp-gotchas`, then come back here.
+- "The tool finished ok but produced a 0-byte / empty output" → first load `galaxy-mcp-gotchas`, then come back here.
 
 **Not for**:
 - Uploading data or managing histories — use `galaxy-histories-and-data`.
@@ -33,17 +33,23 @@ This is the discipline. Skipping any step is the cause of most `run_tool` failur
 
 ### 1. Discover the tool
 ```
-search_tools_by_name(query="trimmomatic")
+search_tools_by_name(query="<tool name>")
 # or
-search_tools_by_keywords(keywords=["adapter", "trimming"])
+search_tools_by_keywords(keywords=["<topic1>", "<topic2>"])
 ```
-Pick the **full ToolShed ID** (e.g., `toolshed.g2.bx.psu.edu/repos/pjbriggs/trimmomatic/trimmomatic/0.39+galaxy2`), not the short name. Short names work but aren't reproducible.
+Pick the **full ToolShed ID** (e.g., `toolshed.g2.bx.psu.edu/repos/<owner>/<name>/<name>/<version>`), not the short name. Short names work but aren't reproducible.
+
+**Token tip:** `search_tools_by_name` returns every cached version of the tool plus near-name matches. Take the top hit (Galaxy returns the most-recent revision first) and move on — don't enumerate. If the search is noisy (e.g., a name that appears in several tool families), use `search_tools_by_keywords` with two specific terms instead.
 
 ### 2. Inspect the schema
 ```
 get_tool_details(tool_id=TOOL, io_details=True)
 ```
 This returns the full parameter tree with names, types, defaults, options, and (critically) the conditional structure. Read it before writing the `inputs` dict — the structure tells you which parameters are conditional (will need pipe-notation) and which are repeats (will need indexed-`_0|`, `_1|` notation).
+
+**Token trap:** for tools with a built-in **reference-index picker** (Bowtie2, BWA, HISAT2, STAR, Salmon, htseq-count's `reference_source=cached`, etc.) the `options` list contains every cached genome on the server — easily 500KB+ of response. Two safer paths:
+- Call `get_tool_run_examples(tool_id)` first; examples usually show the input-dict shape you need without dumping option lists.
+- If you still need `get_tool_details`, the response is auto-saved to a file when oversized. Use `jq` with targeted queries (e.g., `jq '[.data.inputs[].name]'`, `jq '.data.inputs | map(select(.name=="library"))'`) instead of re-reading the whole file. See `references/efficient-discovery.md`.
 
 ### 3. Look up real examples
 ```
@@ -59,13 +65,18 @@ Response includes `outputs[]` (new datasets), `output_collections[]`, `implicit_
 
 ### 5. Poll to terminal state
 ```
+# State-only poll — small response; use this in the wait loop:
+get_dataset_details(dataset_id=D, include_preview=False)
+# Or, equivalently, on the job:
 get_job_details(dataset_id=D)
 # states: new → queued → running → ok | error
 ```
 
 Poll every 30 seconds. Surface state transitions to the parent with timestamps. Hard timeout: 60 minutes per tool. On `error`, read `stderr` from the job details and report it — do not retry blindly.
 
-See `references/job-states.md` for the full state machine.
+**Never poll Galaxy via `curl` from Bash.** The MCP server owns Galaxy credentials; the agent's shell does not see `GALAXY_URL` / `GALAXY_API_KEY` and won't get them by sourcing `.env` (and shouldn't try — `.env` is the user's credential storage). The only correct poll is the MCP call above. For long jobs, prefer `ScheduleWakeup` over busy-looping.
+
+See `references/job-states.md` for the full state machine and `references/efficient-discovery.md` for polling cost tactics.
 
 ### 6. Verify outputs by contents
 After `state: ok`, confirm the output makes sense:
@@ -148,46 +159,44 @@ Result is an `implicit_collections[]` entry, not `outputs[]`. See `references/in
 2. **The first run of a tool you've never used needs the discovery triad.** Skipping `get_tool_details` + `get_tool_run_examples` is the single largest source of wasted MCP calls.
 3. **Don't make up tool IDs.** Always search first. Tool IDs change between Galaxy versions and between the public server vs private instances.
 
-## Example — Trimmomatic SLIDINGWINDOW 4/20 on a single FASTQ
+## Example — generic single-input tool, end-to-end
 
-End-to-end, with the discovery triad and polling.
+The shape below works for any single-input analysis tool. Substitute the tool id, parameter names, and dataset ids from your own discovery calls.
 
 ```
-# 1) Discover
-hits = search_tools_by_name(query="trimmomatic")
-tool_id = "toolshed.g2.bx.psu.edu/repos/pjbriggs/trimmomatic/trimmomatic/0.39+galaxy2"
+# 1) Discover — take the top hit
+hits = search_tools_by_name(query="<tool>")
+tool_id = hits[0]["id"]   # full ToolShed id, latest version
 
-# 2) Inspect — confirm conditional structure
-schema = get_tool_details(tool_id=tool_id, io_details=True)
-# schema shows: readtype.single_or_paired (conditional), operations (repeat),
-# operation.name (conditional within each repeat)
-
-# 3) Examples — copy the working shape
+# 2) Examples first (cheap) — they usually show the exact dict shape
 examples = get_tool_run_examples(tool_id=tool_id)
-# example shows operations_0|operation|name keys
+# Read one or two; copy the key shape.
 
-# 4) Build inputs and run
+# 3) Only if examples don't cover your case: schema
+#    schema = get_tool_details(tool_id=tool_id, io_details=True)
+#    For aligners / reference-index pickers, see efficient-discovery.md FIRST.
+
+# 4) Build inputs from the example shape and run
 inputs = {
-    "readtype|single_or_paired": "single",
-    "fastq_in": {"src": "hda", "id": fastq_dataset_id},
-    "operations_0|operation|name": "SLIDINGWINDOW",
-    "operations_0|operation|window_size": 4,
-    "operations_0|operation|required_quality": 20,
+    "<input_param>": {"src": "hda", "id": input_dataset_id},
+    # ... conditional params with pipe notation, repeats with _0|, _1| prefixes
 }
 result = run_tool(history_id=history_id, tool_id=tool_id, inputs=inputs)
-trimmed_id = result["outputs"][0]["id"]
-job_id = result["jobs"][0]["id"]
+output_id = result["outputs"][0]["id"]
+job_id    = result["jobs"][0]["id"]
 
-# 5) Poll every 30s with state transitions logged
+# 5) Poll every 30s — STATE ONLY, no preview, no curl
+#    get_dataset_details(dataset_id=output_id, include_preview=False)
 #    new → queued → running → ok (or error → read stderr)
 #    Hard cap: 60 minutes; on timeout report job_id and stop.
 
-# 6) Sanity check
-preview = get_dataset_details(dataset_id=trimmed_id, include_preview=True, preview_lines=4)
-# Expect FASTQ records; empty or 0-byte → load galaxy-mcp-gotchas.
+# 6) Sanity check (one preview, after ok)
+preview = get_dataset_details(dataset_id=output_id, include_preview=True, preview_lines=10)
+# If empty / 0-byte / wrong format → load galaxy-mcp-gotchas.
 ```
 
 ## References
 
+- `references/efficient-discovery.md` — token-cost tactics for schemas, searches, polling, and previews. Read this whenever you're about to do extensive discovery on a new tool.
 - `references/input-dict-patterns.md` — full input dict catalog: batch/linked/unlinked, map_over_type, repeats, conditionals, the values wrapper, and when each is required.
 - `references/job-states.md` — state machine, polling cadence, hard timeout, stderr retrieval.

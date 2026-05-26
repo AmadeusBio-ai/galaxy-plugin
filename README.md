@@ -6,7 +6,7 @@ Turn Claude Code into a competent operator of the [Galaxy](https://usegalaxy.org
 
 - **`galaxy-operator` subagent** — a single specialist that owns all Galaxy work. Galaxy knowledge stays out of your main context until you ask for Galaxy work, so this plugin coexists cleanly with other bioinformatics plugins.
 - **6 reactive skills** covering tool execution, histories/data, collections, workflows, results reporting, and a dedicated debugging skill for the MCP server's silent-failure modes.
-- **5 slash commands** for the common high-leverage operations: `/galaxy-setup`, `/galaxy-status`, `/galaxy-publish`, `/galaxy-resume`, `/galaxy-run-lab`.
+- **5 slash commands** for the common high-leverage operations: `/galaxy-setup`, `/galaxy-status`, `/galaxy-publish`, `/galaxy-resume`, `/galaxy-run-protocol`.
 - A bundled MCP server entry wired to the published [`galaxy-mcp`](https://github.com/galaxyproject/galaxy-mcp) server via `uvx`, launched through `bin/galaxy-mcp-launcher.sh` so credentials can come from either the shell or a persisted `.env`.
 
 ## Prerequisites
@@ -72,18 +72,19 @@ This command **verifies** that the MCP server can reach Galaxy with the credenti
 
 ## Example session
 
+Describe what you want in plain English; the operator subagent figures out which tools, histories, and skills to load.
+
 ```
-You: Run Trimmomatic SLIDINGWINDOW 4/20 on my SRR17484561 fastq in the
-     current history, then run Bowtie2 against hg38 with mapping stats.
+You: I uploaded a BAM and a GTF to my "ChIP-seq Apr" history. Find peaks
+     with MACS3, then give me the top 20 peaks by score.
 
 Claude: [spawns galaxy-operator subagent]
         [subagent loads galaxy-tool-execution + galaxy-histories-and-data]
-        [polls jobs to ok, reports overall alignment rate, returns history URL]
+        [discovers MACS3 tool id, runs it, polls to ok, ranks peaks]
+        [returns the top-20 table and the history URL]
 ```
 
-## Benchmark
-
-The end-to-end RNA-seq protocol in `../lab_7.1.md` is used as the plugin's benchmark — see the verification section of the design doc for pass criteria. The plugin itself is not hardcoded to that lab; it's the test fixture, not the target.
+For multi-step protocols (paper methods sections, vendor handbooks, your own SOPs), paste or path the markdown and run `/galaxy-run-protocol` — it phases the work, runs each step, checkpoints between phases, and honors any quality gates the protocol specifies.
 
 ## Issues
 

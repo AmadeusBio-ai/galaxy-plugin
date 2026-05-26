@@ -11,10 +11,10 @@ Owns everything about histories and the dataset I/O around them. If the user say
 ## When to use
 
 - "Create a new history named X"
-- "Upload this FASTQ" / "upload `genes.gtf` from this URL with dbkey hg38"
+- "Upload this FASTQ" / "upload `annotations.gtf` from this URL with dbkey hg38"
 - "Show me the first 10 lines of dataset 42"
 - "Download the BAM to outputs/"
-- "Switch to my Lab 7.1 history"
+- "Switch to my <project> history"
 - "Page through my big history"
 
 **Not for**:
@@ -31,21 +31,21 @@ Owns everything about histories and the dataset I/O around them. If the user say
 
 ### Pick or create a history
 ```
-list_history_ids()                                # quick {id, name} list
-get_histories(name="Lab 7.1", limit=20)           # partial, case-sensitive
-create_history(history_name="Lab 7.1 — 2026-05-25")
+list_history_ids()                                  # quick {id, name} list
+get_histories(name="ChIP-seq Apr", limit=20)        # partial, case-sensitive
+create_history(history_name="<analysis> — 2026-05-25")
 ```
 
-Convention: one history per task, named with date or descriptive title — never reuse for clarity.
+Convention: one history per task, named with date and a descriptive title — never reuse for clarity.
 
 ### Upload data
 ```
 # Local file
-upload_file(path="C:/path/to/SRR17484561.fastq.gz", history_id=H)
+upload_file(path="/path/to/sample.fastq.gz", history_id=H)
 
 # From URL — ALWAYS pass file_type and dbkey for genomic files
 upload_file_from_url(
-    url="https://.../genes.gtf",
+    url="https://.../annotations.gtf",
     history_id=H,
     file_type="gtf",
     dbkey="hg38",
@@ -61,20 +61,24 @@ Wait for the upload's job to reach `ok` (poll `get_job_details(dataset_id)`) bef
 
 ### Preview a dataset
 ```
+# State-only poll — small response, use for waiting loops:
+get_dataset_details(dataset_id=D, include_preview=False)
+
+# Actually look at content — only when you need to read the output:
 get_dataset_details(dataset_id=D, include_preview=True, preview_lines=15)
 ```
-Use this to read alignment-stats files, sanity-check count tables, or confirm a tool produced what you expected. **Always preview after a non-trivial tool run** — `state: ok` is not evidence of correctness.
+Use the previewed form to read stats files, sanity-check count tables, or confirm a tool produced what you expected. **Always preview after a non-trivial tool run** — `state: ok` is not evidence of correctness. But for the polling loop itself, use `include_preview=False` — BAM details with `include_preview=True` dumps the full `@SQ` header (hundreds of contigs, tens of KB) on every poll.
 
 ### Download to disk
 ```
-download_dataset(dataset_id=D, file_path="C:/Users/lyang/Code/Galaxy_DEMO/outputs/counts.tsv")
+download_dataset(dataset_id=D, file_path="outputs/result.tsv")
 ```
 Omit `file_path` to get the content into memory instead.
 
 ## Critical patterns
 
 ### Pass `dbkey` and `file_type` on every upload
-Skipping these is the second-most-common silent-failure cause (after pipe-notation). Bowtie2 and htseq-count both filter their input pickers by dbkey; an uploaded GTF without `dbkey=hg38` will simply not appear in their input dropdown via `run_tool`.
+Skipping these is the second-most-common silent-failure cause (after pipe-notation). Aligners and annotation-aware tools filter their input pickers by dbkey; an uploaded GTF without `dbkey=hg38` will simply not appear in the input dropdown via `run_tool`.
 
 See `references/dbkey-reference.md` for common dbkey values.
 
@@ -89,35 +93,36 @@ get_history_contents(history_id=H, deleted=True, visible=False, limit=200)
 
 ## Example
 
-Create a history, upload a reference GTF from a course URL with the right dbkey, upload a local FASTQ, and preview the first lines of each.
+Create a history, upload a reference annotation file from a URL with the right dbkey, upload a local sequencing read file, and preview the first lines of each.
 
 ```
 # 1) Make the history
-h = create_history(history_name="Lab 7.1 — 2026-05-25")
+h = create_history(history_name="<analysis> — 2026-05-25")
 history_id = h["id"]
 
-# 2) Upload the GTF from the course URL — set file_type and dbkey
-gtf = upload_file_from_url(
-    url="https://bioboot.github.io/bimm143_S24/class-material/genes.gtf",
+# 2) Upload the reference annotation from a URL — set file_type and dbkey
+ref = upload_file_from_url(
+    url="https://example.org/annotations.gtf",
     history_id=history_id,
     file_type="gtf",
     dbkey="hg38",
 )
-gtf_id = gtf["outputs"][0]["id"]
+ref_id = ref["outputs"][0]["id"]
 
-# 3) Upload the local FASTQ
-fastq = upload_file(
-    path="C:/Users/lyang/Code/Galaxy_DEMO/SRR17484561.fastq.gz",
+# 3) Upload the local input data
+reads = upload_file(
+    path="/path/to/sample.fastq.gz",
     history_id=history_id,
 )
-fastq_id = fastq["outputs"][0]["id"]
+reads_id = reads["outputs"][0]["id"]
 
-# 4) Poll both uploads to ok (galaxy-tool-execution has the polling pattern)
+# 4) Poll both uploads to ok — use include_preview=False in the loop
+#    get_dataset_details(dataset_id=ref_id, include_preview=False)
 #    ...wait for state == "ok" on each...
 
-# 5) Sanity check
-get_dataset_details(dataset_id=gtf_id, include_preview=True, preview_lines=5)
-get_dataset_details(dataset_id=fastq_id, include_preview=True, preview_lines=4)
+# 5) Sanity check by content (one preview each, post-ok)
+get_dataset_details(dataset_id=ref_id,   include_preview=True, preview_lines=5)
+get_dataset_details(dataset_id=reads_id, include_preview=True, preview_lines=4)
 ```
 
 ## References

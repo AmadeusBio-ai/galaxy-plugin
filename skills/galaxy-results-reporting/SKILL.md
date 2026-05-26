@@ -11,10 +11,10 @@ The closing-out skill. After a pipeline finishes, the user usually wants two thi
 ## When to use
 
 - "Publish this history and give me the link"
-- "Share my Lab 7.1 results with my collaborator"
+- "Share my <project> results with my collaborator"
 - "Make this history public"
-- "Summarize the pipeline — read counts in/out, alignment rate, top 10 genes"
-- "Download the count table to outputs/"
+- "Summarize the pipeline" (read counts, alignment rate, peak counts, variants, top-N rows of any output table — whichever apply)
+- "Download the count table / BAM / VCF / peaks to outputs/"
 
 **Not for**: running the analysis itself (`galaxy-tool-execution`), navigating the history mid-pipeline (`galaxy-histories-and-data`), differential expression or downstream stats (out of scope for this plugin).
 
@@ -26,9 +26,11 @@ The closing-out skill. After a pipeline finishes, the user usually wants two thi
 
 ## Workflow
 
-### 1. Publish the history and get a share URL
+### 1. Publishing the history (CONFIRM FIRST)
 
-The galaxy-mcp server **does not currently expose** `share_history` or `publish_history` as native tools. Use the BioBlend fallback below.
+The galaxy-mcp server **does not currently expose** `share_history` or `publish_history` as native tools. Publishing is a public-surface action; do NOT publish unless the user explicitly asked, or you have confirmed.
+
+When publishing is authorized, the BioBlend fallback is:
 
 ```python
 # bioblend_publish.py — run via Bash
@@ -39,68 +41,60 @@ gi = GalaxyInstance(url=os.environ["GALAXY_URL"], key=os.environ["GALAXY_API_KEY
 hist = gi.histories.update_history(history_id, published=True, importable=True)
 slug = hist.get("slug") or hist.get("username_and_slug", "").split("/")[-1]
 username = gi.users.get_current_user()["username"]
-print(f"https://usegalaxy.org/u/{username}/h/{slug}")
+host = os.environ["GALAXY_URL"].rstrip("/")
+print(f"{host}/u/{username}/h/{slug}")
 ```
 
-Invoke via the `Bash` tool:
-```
-python -c "$(cat bioblend_publish.py)"
-```
+Invoke via the `Bash` tool. Surface the URL to the parent verbatim — that's the artifact the user actually wanted. If `bioblend` isn't installed, tell the user the install command (`uv pip install bioblend` or `pip install bioblend`) and stop — do not silently skip the publish step.
 
-Surface the URL to the parent verbatim — that's the artifact the user actually wanted.
+Note: the agent's Bash environment may not see `GALAXY_URL` / `GALAXY_API_KEY` (the MCP launcher reads them, the agent's shell does not). If `os.environ["GALAXY_URL"]` is empty in the script, ask the user to either export the two vars in the shell that launched Claude, or to invoke `/galaxy-setup` to debug.
 
-### 2. Build a summary
+### 2. Build a summary — shape depends on the pipeline
 
-For an RNA-seq pipeline (the canonical case), the summary the user wants is:
+There is no single template — pick metrics the user actually cares about for this analysis. Common shapes:
 
-- Input read count (raw FASTQ line count / 4)
-- Post-trim read count (trimmed FASTQ line count / 4)
-- Overall alignment rate (from Bowtie2 mapping stats dataset)
-- Top N expressed genes (from htseq-count output)
+| Pipeline | Useful metrics |
+|---|---|
+| Read alignment | input read count, aligned read count, overall alignment rate, top contigs by depth |
+| RNA-seq quantification | input reads, post-trim reads, alignment rate, top-N expressed features |
+| ChIP-seq / ATAC-seq peak calling | input reads, mapped reads, peak count, top-N peaks by score |
+| Variant calling | input reads, mapped reads, total variants, SNV/indel breakdown |
+| Assembly | input reads, contig count, N50, total length |
+| Generic | input row count, output row count, % retained, head of the output |
 
-Pull each piece via `get_dataset_details(dataset_id, include_preview=True, preview_lines=N)`:
-
-```
-# Mapping stats — look for the "overall alignment rate" line
-stats = get_dataset_details(dataset_id=bowtie_stats_id, include_preview=True, preview_lines=15)
-
-# Count table — sort by count desc, take top N
-counts = get_dataset_details(dataset_id=htseq_counts_id, include_preview=True, preview_lines=500)
-# Parse the preview text, drop __no_feature / __ambiguous / __too_low_aQual /
-# __not_aligned / __alignment_not_unique rows, sort by col 2 desc, take top N.
-```
-
-For larger count tables that don't fit in a preview, download first, then process locally:
+Pull each piece via `get_dataset_details(dataset_id, include_preview=True, preview_lines=N)`. For tables larger than a useful preview, download first then process locally:
 
 ```
-download_dataset(dataset_id=htseq_counts_id, file_path="outputs/counts.tsv")
-# Then use Bash with awk/sort/head, or Python with pandas.
+# Mapping stats / log files — look for the metric line
+stats = get_dataset_details(dataset_id=stats_id, include_preview=True, preview_lines=20)
+
+# A larger output table — download then process
+download_dataset(dataset_id=table_id, file_path="outputs/result.tsv")
+# Then use Bash with awk/sort/head, or Python with pandas, to extract top-N or summary rows.
 ```
+
+When the output is a count table from `htseq-count` or similar, drop the trailing summary rows (lines starting with `__`) before ranking — they have huge counts and dominate any naive sort.
 
 ### 3. Download the user-facing outputs
 
-Mirror the key outputs to a local `outputs/` directory so the user has offline copies:
+Mirror the key outputs to a local `outputs/` directory so the user has offline copies. Pick the user-facing artifacts only — don't download intermediates:
 
 ```
-download_dataset(dataset_id=trimmed_fastq_id, file_path="outputs/trimmed.fastq.gz")
-download_dataset(dataset_id=bam_id,           file_path="outputs/aligned.bam")
-download_dataset(dataset_id=htseq_counts_id,  file_path="outputs/counts.tsv")
+download_dataset(dataset_id=main_output_id, file_path="outputs/<descriptive-name>.<ext>")
 ```
-
-Don't download everything by default — only the artifacts the user is likely to want offline. Intermediate datasets stay in Galaxy.
 
 ### 4. Return a tidy summary to the parent
 
+Template — adapt the rows to the pipeline:
+
 ```
-Published: https://usegalaxy.org/u/<user>/h/<slug>
-Pipeline outputs (history id: <id>):
-- raw reads:        12,481,332
-- post-trim reads:  11,902,118  (95.4% retained)
-- alignment rate:   89.3%
-- top 10 genes by count:
-    ENSG00000111640  GAPDH   18,422
-    ...
-Saved locally: outputs/{trimmed.fastq.gz, aligned.bam, counts.tsv}
+History: <name> (private link: https://<host>/histories/view?id=<id>)
+[Published: https://<host>/u/<user>/h/<slug>]    <-- only if publishing was authorized
+Outputs:
+- <metric 1>: <value>
+- <metric 2>: <value>
+- top N: <short table>
+Saved locally: outputs/{<files>}
 ```
 
 Keep it short. Detailed previews go in the response only if asked.
@@ -113,37 +107,38 @@ A pipeline that ran perfectly but produced no shareable link is, to the user, a 
 ### Drop htseq-count's `__` rows before "top genes"
 htseq-count's output ends with summary lines: `__no_feature`, `__ambiguous`, `__too_low_aQual`, `__not_aligned`, `__alignment_not_unique`. They have huge counts and will dominate any naive "top by count". Filter them out before sorting.
 
-### Don't recompute alignment rate by hand
-Bowtie2's mapping-stats dataset already contains "X.XX% overall alignment rate" as a line. Parse that line instead of computing it from BAM flagstats — the formats can differ subtly and the user will trust the stats output.
+### Don't recompute summary metrics by hand
+Aligners and callers usually emit a stats / log dataset with the metric the user wants (overall alignment rate, peak count, called variants, contig N50). Parse that line instead of computing it from the primary output — formats can differ subtly and the user will trust the tool's own stats output.
 
 ## Gotchas
 
 1. **BioBlend fallback only works if `bioblend` is installed.** If `python -c "import bioblend"` fails, instruct the user to `pip install bioblend` (or `uv pip install bioblend`) and retry. Don't silently skip the publish step.
-2. **Don't publish without telling the user.** "Published" means publicly accessible to anyone with the URL. If the user only said "give me a link", check whether they want public sharing or just a private link.
+2. **Always confirm before publishing.** "Published" / "importable" means anyone with the URL can view (and import) the history. If the user only said "give me a link", they probably want the private link to their own history (`/histories/view?id=<id>`), not a public share. When in doubt, ask.
 3. **The slug isn't the history name.** Galaxy lowercases and hyphenates the name for the URL slug. Use whatever BioBlend returns in `slug` rather than constructing it yourself.
+4. **The host comes from `GALAXY_URL`, not the hardcoded `usegalaxy.org`.** Some users run private Galaxy instances. Pull the host from the env / from the user's earlier `connect` response.
 
-## Example — close out an RNA-seq pipeline
+## Example — close out a generic alignment-and-quantify pipeline
 
 ```
-# 1) Publish
-share_url = "<run BioBlend snippet via Bash>"
-
-# 2) Mapping stats
+# 1) Stats / summary dataset
 stats_text = get_dataset_details(
-    dataset_id=bowtie_stats_id, include_preview=True, preview_lines=15
+    dataset_id=stats_id, include_preview=True, preview_lines=20
 )["preview"]
-align_rate_line = next(l for l in stats_text.splitlines() if "overall alignment" in l)
-# e.g. "89.34% overall alignment rate"
+# Extract the metric line your tool emits — e.g.:
+#   "89.34% overall alignment rate" for Bowtie2
+#   "Total peaks: 14,221" for MACS3
+#   "Number of variants:  4521" for bcftools stats
+metric_line = next(l for l in stats_text.splitlines() if "<keyword>" in l)
 
-# 3) Top-10 from counts
-counts_text = get_dataset_details(
-    dataset_id=htseq_counts_id, include_preview=True, preview_lines=500
+# 2) Top-N from a tabular output
+table_text = get_dataset_details(
+    dataset_id=table_id, include_preview=True, preview_lines=500
 )["preview"]
-rows = [l.split("\t") for l in counts_text.splitlines() if not l.startswith("__")]
-top10 = sorted(rows, key=lambda r: int(r[1]), reverse=True)[:10]
+rows = [l.split("\t") for l in table_text.splitlines() if not l.startswith("__")]
+top10 = sorted(rows, key=lambda r: float(r[1]), reverse=True)[:10]
 
-# 4) Mirror outputs
-download_dataset(dataset_id=htseq_counts_id, file_path="outputs/counts.tsv")
+# 3) Mirror the user-facing output
+download_dataset(dataset_id=table_id, file_path="outputs/<descriptive>.tsv")
 
-# 5) Return summary (see template above)
+# 4) Return summary (see template above)
 ```

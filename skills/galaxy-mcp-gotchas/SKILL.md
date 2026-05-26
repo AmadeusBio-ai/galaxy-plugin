@@ -99,7 +99,38 @@ This bites freshly-configured environments. If the first `connect` call hangs or
 
 Don't request all datasets at once. `limit=100, offset=N` and iterate.
 
+## 9. Token-waste traps (efficiency, not correctness)
+
+These don't cause wrong answers — they bleed context. Worth knowing before you exhaust the window mid-pipeline.
+
+### 9a. `get_tool_details(io_details=True)` on tools with built-in reference indices
+
+Aligners (Bowtie2, BWA, HISAT2, STAR, minimap2), pseudo-aligners (Salmon, kallisto), and any tool whose `reference_genome` / `reference_source` parameter is a "Locally cached" select — the `options` array of that parameter lists every cached genome on the server. The response can exceed 500 KB and force a save-to-file detour with downstream `jq` calls just to find the actual input names.
+
+Fix: call `get_tool_run_examples` first; only fall through to `get_tool_details` when examples don't show what you need. If you must, use targeted `jq` queries on the saved file. Full recipe in `../galaxy-tool-execution/references/efficient-discovery.md`.
+
+### 9b. `search_tools_by_name` returns every cached version + near matches
+
+A search for a popular tool returns 8-22 hits (every version row plus unrelated tools that share the name). Take the top hit; don't enumerate. If too noisy, switch to `search_tools_by_keywords` with two specific terms.
+
+### 9c. `include_preview=True` in a polling loop
+
+`get_dataset_details(dataset_id=BAM, include_preview=True)` dumps the full `@SQ` header — every reference contig (~30 KB for hg38). On a 20-minute alignment polled every 30s, that's ~1.2 MB of context for nothing useful.
+
+Fix: poll with `include_preview=False`. Only set `True` once, after the state reaches `ok`, when you actually need to read the output.
+
+### 9d. Polling Galaxy via `curl` from Bash
+
+This *will not work* and wastes calls. The MCP server has the Galaxy credentials; the agent's shell does not see `GALAXY_URL` / `GALAXY_API_KEY` and won't get them by sourcing `.env` (which is also blocked as credential storage). Every `curl -H "x-api-key: $GALAXY_API_KEY" "${GALAXY_URL}api/..."` returns empty.
+
+Fix: poll via `get_dataset_details` (MCP). For long jobs, use `ScheduleWakeup` so you don't busy-loop. See `../galaxy-tool-execution/references/efficient-discovery.md` §3.
+
+### 9e. Re-fetching what you already have
+
+Schemas, tool ids, and dataset ids don't change mid-conversation. If you've already searched for a tool or inspected its schema this turn, reuse the result — don't re-call.
+
 ## References
 
+- `../galaxy-tool-execution/references/efficient-discovery.md` — full recipes for the token-waste traps above.
 - `../galaxy-collections/references/apply-rules-dsl.md` — full Apply Rules DSL when you need it.
 - `../galaxy-tool-execution/references/input-dict-patterns.md` — exhaustive input dict patterns (batch, linked, map_over_type, repeats).
