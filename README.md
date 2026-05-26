@@ -13,35 +13,48 @@ Turn Claude Code into a competent operator of the [Galaxy](https://usegalaxy.org
 
 1. [`uv` / `uvx`](https://docs.astral.sh/uv/) installed and on PATH.
 2. A Galaxy API key — get one at `User → Preferences → Manage API Key` on usegalaxy.org (or whatever Galaxy instance you use).
-3. Provide the URL and API key in one of two ways. The plugin's launcher checks the shell first, then falls back to a persisted `.env`.
 
-   **a) Shell env (recommended for power users)** — before launching Claude Code:
+> **Security note.** Never paste your `GALAXY_API_KEY` into Claude's chat. The chat is written to the session transcript on disk, which makes the key recoverable by anyone with read access to that file. Use one of the two options below — both keep the key out of Claude's context. This plugin's `/galaxy:galaxy-setup` will **not** prompt you for the key.
 
-   Linux / macOS:
+### Option A — shell export (recommended)
 
-   ```bash
-   export GALAXY_URL="https://usegalaxy.org/"   # trailing slash matters
-   export GALAXY_API_KEY="<your key>"
-   ```
+Before launching Claude Code, export both vars in your shell.
 
-   Windows PowerShell:
+Linux / macOS:
 
-   ```powershell
-   $env:GALAXY_URL = "https://usegalaxy.org/"   # trailing slash matters
-   $env:GALAXY_API_KEY = "<your key>"
-   ```
+```bash
+export GALAXY_URL="https://usegalaxy.org/"   # trailing slash matters
+export GALAXY_API_KEY="<your key>"
+```
 
-   .env file (cross platform):
+Windows PowerShell:
 
-   create .env file inside working directory with
+```powershell
+$env:GALAXY_URL = "https://usegalaxy.org/"   # trailing slash matters
+$env:GALAXY_API_KEY = "<your key>"
+```
 
-   ```
-   # Inside a file named .env
-   GALAXY_URL=https://usegalaxy.org/
-   GALAXY_API_KEY=<your key>
-   ```
+Then `claude` from the same shell. The launcher inherits the vars and never touches disk.
 
-   **b) Prompted (no shell setup)** — just load the plugin (see below), then run `/galaxy:galaxy-setup`. The command prompts you for the URL and key and persists them (mode 0600) to `${CLAUDE_PLUGIN_DATA}/galaxy.env`. Shell-provided values always win over the `.env` file, so option (a) takes precedence whenever both are present.
+### Option B — project `.env`
+
+Using your own editor (not Claude), create `.env` in your project's working directory:
+
+```
+GALAXY_URL=https://usegalaxy.org/
+GALAXY_API_KEY=<your key>
+```
+
+Then in your shell:
+
+```bash
+chmod 600 .env
+echo .env >> .gitignore   # if this is a git repo
+```
+
+The launcher reads this file directly in bash; Claude does not. If you prefer a Galaxy-specific filename so the key doesn't share a file with other project secrets, use `.galaxy.env` instead — it's checked first and overrides `.env` when both exist.
+
+**Resolution order** (first hit wins; values never overwritten by a later source): shell env → `./.galaxy.env` → `./.env`.
 
 ## Load the plugin
 
@@ -55,7 +68,7 @@ Then in the session, run:
 /galaxy:galaxy-setup
 ```
 
-If the shell already has `GALAXY_URL` and `GALAXY_API_KEY`, the command just smoke-tests the connection. Otherwise it prompts you for them, writes them to `${CLAUDE_PLUGIN_DATA}/galaxy.env`, and asks you to reconnect via `/mcp` (or restart Claude Code).
+This command **verifies** that the MCP server can reach Galaxy with the credentials the launcher resolved. It does not read your `.env` and does not prompt for the key. If nothing is configured, it prints the two options above and stops; configure one of them, run `/mcp` to reconnect the `galaxy` server (or restart Claude Code), and re-run `/galaxy:galaxy-setup`.
 
 ## Example session
 

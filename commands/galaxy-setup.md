@@ -1,38 +1,66 @@
 ---
-description: Verify Galaxy MCP credentials, prompting for and persisting them to .env if the shell doesn't already have them.
+description: Verify the Galaxy MCP server can reach Galaxy with the user's credentials. Does NOT read .env files or prompt for the API key.
 ---
 
-Galaxy MCP setup flow. Do all of the following in order:
+Galaxy MCP setup verifier. **Critical security rules — follow these exactly:**
 
-1. **Detect shell env.** Run this Bash command and report which of the two are present in the shell. Never print the key value itself, only its length.
+- **DO NOT** read `.env`, `.galaxy.env`, or any file that might contain `GALAXY_API_KEY`. No `Read`, no `cat`, `head`, `tail`, `less`, `grep`, `awk`, `sed`, no environment-file plugins. File existence checks (`test -f`, `ls`) are fine.
+- **DO NOT** echo, print, or otherwise reveal `$GALAXY_API_KEY`. Only its length (e.g. `${#GALAXY_API_KEY}`) is allowed.
+- **DO NOT** ask the user to paste their API key into the chat. The chat is written to the session transcript on disk. If the user volunteers the key anyway, refuse to write it and re-print the instructions block from step 2.
+- **DO NOT** write any file containing the API key. The launcher reads credentials from the user's own `.env`; that is the only place the key should live on disk.
+
+Steps:
+
+1. **Detect state (no secret exposure).** Run exactly this Bash command and report the four lines verbatim:
 
    ```bash
-   bash -c 'echo "GALAXY_URL=${GALAXY_URL:-<unset>}"; if [[ -n "$GALAXY_API_KEY" ]]; then echo "GALAXY_API_KEY=<set (${#GALAXY_API_KEY} chars)>"; else echo "GALAXY_API_KEY=<unset>"; fi'
+   bash -c '
+   echo "shell GALAXY_URL=${GALAXY_URL:-<unset>}";
+   if [[ -n "${GALAXY_API_KEY:-}" ]]; then
+     echo "shell GALAXY_API_KEY=<set (${#GALAXY_API_KEY} chars)>";
+   else
+     echo "shell GALAXY_API_KEY=<unset>";
+   fi;
+   [[ -f .galaxy.env ]] && echo "file .galaxy.env=present" || echo "file .galaxy.env=absent";
+   [[ -f .env ]] && echo "file .env=present" || echo "file .env=absent"
+   '
    ```
 
-2. **Check persisted .env.** Check whether `${CLAUDE_PLUGIN_DATA}/galaxy.env` exists. If it does and the shell vars are unset, that file is what the launcher (`bin/galaxy-mcp-launcher.sh`) will source; tell the user. If both shell vars are already set, skip steps 3–5 and jump straight to step 6.
+2. **Branch.**
+   - If shell `GALAXY_URL` **and** shell `GALAXY_API_KEY` are set → go to step 3.
+   - Else if either `.galaxy.env` or `.env` is present in the working directory → assume the launcher will resolve creds from one of them; go to step 3. (Do not open the file to verify; let the smoke test in step 3 prove or disprove it.)
+   - Else → print the **Instructions block** below verbatim and STOP. Do not call AskUserQuestion. Do not call Bash again. End the turn.
 
-3. **Prompt only for what's missing.** For each of `GALAXY_URL` and `GALAXY_API_KEY` that is **not** present in either the shell or the existing `.env`, ask the user for it:
-   - **URL** — default `https://usegalaxy.org/` (trailing slash required). Accept the default if they confirm.
-   - **API key** — ask the user to paste their key (from `User → Preferences → Manage API Key` on their Galaxy instance). Acknowledge that pasting into the chat means the value will appear in the conversation transcript on disk. If they prefer not to, they can instead `export GALAXY_API_KEY=...` in their shell and restart Claude Code, in which case you should skip the `.env` write entirely.
+   **Instructions block (print verbatim when neither shell nor a file is present):**
 
-4. **Persist.** Write a `.env` file at `${CLAUDE_PLUGIN_DATA}/galaxy.env` with exactly these contents (no `export`, no quotes, one assignment per line):
+   ---
+   > **No Galaxy credentials are reachable yet.** Pick one of the two options below. **Do not paste your API key into this chat** — anything in the chat is written to the session transcript on disk. Use your own editor or shell instead.
+   >
+   > **Option A — shell export (recommended).**
+   > Quit Claude Code. In your shell, run:
+   > ```bash
+   > export GALAXY_URL="https://usegalaxy.org/"
+   > export GALAXY_API_KEY="<your-key>"
+   > ```
+   > Then restart Claude Code in this directory and re-run `/galaxy:galaxy-setup`.
+   >
+   > **Option B — project `.env`.**
+   > In your own editor (not Claude), create a file called `.env` in this directory with:
+   > ```
+   > GALAXY_URL=https://usegalaxy.org/
+   > GALAXY_API_KEY=<your-key>
+   > ```
+   > Then in your shell: `chmod 600 .env` and add `.env` to your `.gitignore`. Run `/mcp` in Claude to reconnect the `galaxy` server, then re-run `/galaxy:galaxy-setup`.
+   >
+   > Get a key at `User → Preferences → Manage API Key` on your Galaxy instance.
+   ---
 
-   ```
-   GALAXY_URL=<value>
-   GALAXY_API_KEY=<value>
-   ```
-
-   Before writing: `mkdir -p "${CLAUDE_PLUGIN_DATA}"`. After writing: `chmod 600 "${CLAUDE_PLUGIN_DATA}/galaxy.env"` so the key is readable only by the user.
-
-5. **Reconnect.** Tell the user to run `/mcp` and reconnect the `galaxy` server (or restart Claude Code). The launcher re-runs on each MCP server start and will source the new `.env`.
-
-6. **Smoke test.** Spawn the `galaxy:galaxy-operator` subagent with this brief:
+3. **Smoke test.** Spawn the `galaxy:galaxy-operator` subagent with this brief:
 
    <brief>
-   Call `mcp__galaxy__get_user()`, `mcp__galaxy__get_server_info()`, and `mcp__galaxy__search_tools_by_name(query="trimmomatic")`. Report one-line pass/fail per call, with username/email for get_user and version for get_server_info. Do **not** look at `$GALAXY_URL` or `$GALAXY_API_KEY` in the shell — the MCP server has them and that is what you are testing.
+   Call `get_user()`, `get_server_info()`, and `search_tools_by_name(query="trimmomatic")`. Report one-line pass/fail per call, with username/email for get_user and version for get_server_info. Do **not** look at `$GALAXY_URL` or `$GALAXY_API_KEY` in your own shell — the MCP server already has them and that is what you are testing.
    </brief>
 
    Return the subagent's report verbatim.
 
-If step 6 fails with auth/401, the most likely cause is an expired or wrong API key — direct the user to re-run `/galaxy:galaxy-setup` and re-paste the key.
+4. **On failure.** If the smoke test fails with auth/401, tell the user: "Your `GALAXY_API_KEY` looks wrong or expired. Update it in your shell export or in your `.env` (using your own editor), then run `/mcp` to reconnect the `galaxy` server and re-run `/galaxy:galaxy-setup`." Do **not** offer to read or edit the `.env` for them.
