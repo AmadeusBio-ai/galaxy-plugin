@@ -31,6 +31,16 @@ Turn Claude Code into a competent operator of the [Galaxy](https://usegalaxy.org
    $env:GALAXY_API_KEY = "<your key>"
    ```
 
+   .env file (cross platform):
+
+   create .env file inside working directory with
+
+   ```
+   # Inside a file named .env
+   GALAXY_URL=https://usegalaxy.org/
+   GALAXY_API_KEY=<your key>
+   ```
+
    **b) Prompted (no shell setup)** — just load the plugin (see below), then run `/galaxy:galaxy-setup`. The command prompts you for the URL and key and persists them (mode 0600) to `${CLAUDE_PLUGIN_DATA}/galaxy.env`. Shell-provided values always win over the `.env` file, so option (a) takes precedence whenever both are present.
 
 ## Load the plugin
