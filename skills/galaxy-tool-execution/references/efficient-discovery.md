@@ -34,14 +34,24 @@ jq '.data.inputs | map({name, type, optional})' <path>
 
 You are **explicitly forbidden** from reading the `options` array for common reference-index pickers (Bowtie2, BWA, etc.) into your context.
 
-Instead, "guess" the value based on standard dataset namespaces (e.g., `hg38`, `mm10`, `dm6`). You don't need to enumerate the options to know the dbkey. Set it directly:
+**Exception:** If the user specifies a specific assembly version, "latest", a patch, or any natural language constraint beyond the generic species name (e.g., "latest human", "Patch11", "GRCm39"), you must **not** blindly guess the base `dbkey`. 
+
+Instead, use a targeted `jq` query to retrieve all available options for the *base* genome (e.g., searching for `hg38` or `GRCh38`). You must then read the returned option strings and manually select the one that satisfies the user's chronological constraint (e.g., highest patch number, most recent date) or specific version. 
+
+**CRITICAL**: Do NOT search the options array for the word "latest" itself. Galaxy option strings contain dates and patch numbers (e.g., `GRCh38.p11 Jun. 2017 (hg38Patch11)`), not the word "latest".
+
+```bash
+# Extract all options matching the base genome (e.g., 'hg38' or 'GRCh38') to manually find the latest patch or specific version
+jq '.data.inputs | .. | objects | select(.name=="index") | .options[]? | select(.[0] | test("(?i)<base_genome_keyword>"))' <path>
+```
+
+If the user does *not* specify a constraint and just says "human" or "hg38", you should "guess" the value based on standard dataset namespaces (e.g., `hg38`, `mm10`, `dm6`). You don't need to enumerate the options to know the base dbkey. Set it directly:
 
 ```python
 inputs = {
     "reference_genome|source": "indexed",
     "reference_genome|index":  "hg38",
 }
-
 ```
 
 If the server doesn't have that index cached, `run_tool` fails with a clear error — much cheaper than a 500 KB schema dump up-front.

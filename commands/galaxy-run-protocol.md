@@ -1,5 +1,5 @@
 ---
-description: Execute a multi-step Galaxy protocol end-to-end (a paper methods section, vendor handbook, pasted SOP, or written analysis plan) with checkpoints between phases.
+description: Execute a multi-step Galaxy protocol end-to-end (a paper methods section, vendor handbook, pasted SOP, or written analysis plan) with checkpoints between phases. CRITICAL: When passing arguments to this command, do NOT summarize or normalize genome assemblies (e.g. do not reduce 'latest GRCh38' to 'hg38'). Pass the exact text or file path so the subagent can parse exact constraints.
 argument-hint: "[path to protocol markdown, OR pasted text]"
 ---
 
