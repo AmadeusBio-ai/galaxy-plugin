@@ -1,11 +1,11 @@
 ---
+name: galaxy-status
 description: List active Galaxy jobs in the most recent history with state and elapsed time.
 argument-hint: "[history name or id]"
+context: fork
+agent: galaxy-operator
 ---
 
-Spawn the `galaxy-operator` subagent with this brief:
-
-<brief>
 Report the status of active jobs.
 
 1. Determine the target history:
@@ -15,6 +15,3 @@ Report the status of active jobs.
 3. For each item in a non-terminal state (`new`, `queued`, `running`, `paused`), call `get_job_details(dataset_id=...)` and collect: dataset name, state, tool id, elapsed time since job creation.
 4. Sort the result by elapsed time descending (oldest first — those are the ones worth investigating).
 5. Return a short table. If everything is terminal (all `ok` or `error`), say so plainly and surface any `error` jobs separately.
-</brief>
-
-Return the subagent's report to me.

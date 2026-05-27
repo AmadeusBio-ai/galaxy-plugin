@@ -1,14 +1,14 @@
 ---
+name: galaxy-resume
 description: Triage a failed/stalled Galaxy pipeline — summarize completed steps, pull stderr for errors, propose next action.
 argument-hint: "[history name or id]"
+context: fork
+agent: galaxy-operator
 ---
 
-Spawn the `galaxy-operator` subagent with this brief:
-
-<brief>
 Triage a stalled or failed pipeline in a Galaxy history.
 
-1. Resolve the target history (as in `/galaxy-status`).
+1. Resolve the target history (as in `/galaxy-status`) using `$ARGUMENTS`.
 2. List `get_history_contents(history_id=H, order="hid-asc", limit=200)` — full chronological order.
 3. Partition the items by state: completed (`ok`), failed (`error`, `paused`), in-flight (`new`, `queued`, `running`).
 4. For each failed item, call `get_job_details(dataset_id=...)` and extract:
@@ -23,6 +23,3 @@ Triage a stalled or failed pipeline in a Galaxy history.
    - **Recommended next action**: one sentence — either "fix X and re-run step Y" or "cancel and restart from step Z".
 
 Do NOT auto-retry anything. The user decides whether to re-run.
-</brief>
-
-Return the triage report to me.

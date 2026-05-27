@@ -6,126 +6,81 @@ disable-model-invocation: true
 
 # Galaxy Histories and Data
 
-Owns everything about histories and the dataset I/O around them. If the user says "upload", "create a history", "switch to", "preview", "download", or names a file format, you handle it.
-
-## When to use
-
+<when_to_use>
 - "Create a new history named X"
-- "Upload this FASTQ" / "upload `annotations.gtf` from this URL with dbkey hg38"
+- "Upload this FASTQ" / "upload `annotations.gtf` from this URL with dbkey mm10"
 - "Show me the first 10 lines of dataset 42"
 - "Download the BAM to outputs/"
 - "Switch to my <project> history"
 - "Page through my big history"
 
-**Not for**:
-- Running tools — use `galaxy-tool-execution`.
-- Collection-specific ops (filter, relabel, paired-end pairing) — use `galaxy-collections`.
-- Publishing or sharing the history at the end of a run — use `galaxy-results-reporting`.
+Not for:
+- Running tools (use `galaxy-tool-execution`)
+- Collection-specific ops (use `galaxy-collections`)
+- Publishing or sharing the history (use `galaxy-results-reporting`)
+</when_to_use>
 
-## Prerequisites
+<instructions>
+Ensure MCP is connected and a history is available. Create one if needed.
+Convention: Use one history per task, named with date and descriptive title.
 
-- MCP connected (run `/galaxy-setup` if not).
-- A history to write into. If none exists for this task, create one as the first step.
+1. Pick or create a history
+`list_history_ids()`
+`get_histories(name="ChIP-seq Apr", limit=20)`
+`create_history(history_name="<analysis> — 2026-05-25")`
 
-## Workflow
+2. Upload data
+Local file: `upload_file(path="/path/to/sample.fastq.gz", history_id=H)`
+From URL: `upload_file_from_url(url="...", history_id=H, file_type="gtf", dbkey="dm6")`
+Always pass `file_type` and `dbkey` for genomic files.
+Wait for the upload job to reach `ok` before using the dataset in tools.
 
-### Pick or create a history
-```
-list_history_ids()                                  # quick {id, name} list
-get_histories(name="ChIP-seq Apr", limit=20)        # partial, case-sensitive
-create_history(history_name="<analysis> — 2026-05-25")
-```
+3. Find a dataset
+By UI number (`hid`): Use `get_history_contents(history_id=H, order="hid-dsc", limit=50)`, filter by `hid`, and use the `id`.
+To include hidden/deleted: `get_history_contents(history_id=H, deleted=True, visible=False, limit=200)`.
+For large histories, paginate with `limit` and `offset`.
 
-Convention: one history per task, named with date and a descriptive title — never reuse for clarity.
+4. Preview a dataset
+For polling status: `get_dataset_details(dataset_id=D, include_preview=False)`
+For reading contents: `get_dataset_details(dataset_id=D, include_preview=True, preview_lines=15)`
+Always preview after a tool runs (`state: ok` doesn't mean correctness), but use `include_preview=False` in wait loops to avoid dumping large headers.
 
-### Upload data
-```
-# Local file
-upload_file(path="/path/to/sample.fastq.gz", history_id=H)
+5. Download to disk
+`download_dataset(dataset_id=D, file_path="outputs/result.tsv")`
+Omit `file_path` to load into memory instead.
 
-# From URL — ALWAYS pass file_type and dbkey for genomic files
-upload_file_from_url(
-    url="https://.../annotations.gtf",
-    history_id=H,
-    file_type="gtf",
-    dbkey="hg38",
-)
-```
+Critical Patterns:
+- Pass `dbkey` and `file_type` on every upload to avoid silent downstream failures. Check `references/dbkey-reference.md`.
+- Use `id` (hex hash) for MCP calls, not `hid` (UI number). Look up `hid` first if provided by user.
+</instructions>
 
-Wait for the upload's job to reach `ok` (poll `get_job_details(dataset_id)`) before passing the new dataset into another tool — downstream tools refuse `queued`/`running` inputs.
-
-### Find a dataset
-- By UI number (`hid`): `get_history_contents(history_id=H, order="hid-dsc", limit=50)` then filter the result for the `hid` you want; use the returned `id` for further calls.
-- Most recent first: `order="hid-dsc"`.
-- Pagination on big histories: `limit=100, offset=0`, then `offset=100`, …
-
-### Preview a dataset
-```
-# State-only poll — small response, use for waiting loops:
-get_dataset_details(dataset_id=D, include_preview=False)
-
-# Actually look at content — only when you need to read the output:
-get_dataset_details(dataset_id=D, include_preview=True, preview_lines=15)
-```
-Use the previewed form to read stats files, sanity-check count tables, or confirm a tool produced what you expected. **Always preview after a non-trivial tool run** — `state: ok` is not evidence of correctness. But for the polling loop itself, use `include_preview=False` — BAM details with `include_preview=True` dumps the full `@SQ` header (hundreds of contigs, tens of KB) on every poll.
-
-### Download to disk
-```
-download_dataset(dataset_id=D, file_path="outputs/result.tsv")
-```
-Omit `file_path` to get the content into memory instead.
-
-## Critical patterns
-
-### Pass `dbkey` and `file_type` on every upload
-Skipping these is the second-most-common silent-failure cause (after pipe-notation). Aligners and annotation-aware tools filter their input pickers by dbkey; an uploaded GTF without `dbkey=hg38` will simply not appear in the input dropdown via `run_tool`.
-
-See `references/dbkey-reference.md` for common dbkey values.
-
-### `id` (hex hash) vs `hid` (UI number)
-Every MCP call uses `id`. If the user gives you "dataset 13", that's an `hid` — look it up first.
-
-### Default `get_history_contents` hides hidden/deleted datasets
-If a history looks empty but the UI shows datasets:
-```
-get_history_contents(history_id=H, deleted=True, visible=False, limit=200)
-```
-
-## Example
-
-Create a history, upload a reference annotation file from a URL with the right dbkey, upload a local sequencing read file, and preview the first lines of each.
-
-```
-# 1) Make the history
+<example>
+# Create history, upload URL ref and local data, preview
 h = create_history(history_name="<analysis> — 2026-05-25")
 history_id = h["id"]
 
-# 2) Upload the reference annotation from a URL — set file_type and dbkey
 ref = upload_file_from_url(
     url="https://example.org/annotations.gtf",
     history_id=history_id,
     file_type="gtf",
-    dbkey="hg38",
+    dbkey="mm10",
 )
 ref_id = ref["outputs"][0]["id"]
 
-# 3) Upload the local input data
 reads = upload_file(
     path="/path/to/sample.fastq.gz",
     history_id=history_id,
 )
 reads_id = reads["outputs"][0]["id"]
 
-# 4) Poll both uploads to ok — use include_preview=False in the loop
-#    get_dataset_details(dataset_id=ref_id, include_preview=False)
-#    ...wait for state == "ok" on each...
+# Poll both to ok
+# get_dataset_details(dataset_id=ref_id, include_preview=False)
 
-# 5) Sanity check by content (one preview each, post-ok)
+# Sanity check content
 get_dataset_details(dataset_id=ref_id,   include_preview=True, preview_lines=5)
 get_dataset_details(dataset_id=reads_id, include_preview=True, preview_lines=4)
-```
+</example>
 
 ## References
-
-- `references/dbkey-reference.md` — common dbkey values (hg38, hg19, mm10, dm6, sacCer3, etc.).
-- `references/dataset-retrieval.md` — pagination patterns, order options, hid-by-URL slug lookup, hidden/deleted toggles.
+- `references/dbkey-reference.md` — common dbkey values.
+- `references/dataset-retrieval.md` — pagination patterns, hidden/deleted toggles.

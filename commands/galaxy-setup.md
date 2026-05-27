@@ -1,5 +1,9 @@
 ---
+name: galaxy-setup
 description: Verify the Galaxy MCP server can reach Galaxy with the user's credentials. Does NOT read .env files or prompt for the API key.
+disable-model-invocation: true
+context: fork
+agent: galaxy-operator
 ---
 
 Galaxy MCP setup verifier. **Critical security rules — follow these exactly:**
@@ -56,12 +60,6 @@ Steps:
    > Get a key at `User → Preferences → Manage API Key` on your Galaxy instance.
    ---
 
-3. **Smoke test.** Spawn the `galaxy:galaxy-operator` subagent with this brief:
-
-   <brief>
-   Call `get_user()`, `get_server_info()`, and `search_tools_by_name(query="trimmomatic")`. Report one-line pass/fail per call, with username/email for get_user and version for get_server_info. Do **not** look at `$GALAXY_URL` or `$GALAXY_API_KEY` in your own shell — the MCP server already has them and that is what you are testing.
-   </brief>
-
-   Return the subagent's report verbatim.
+3. **Smoke test.** Call `get_user()`, `get_server_info()`, and `search_tools_by_name(query="trimmomatic")`. Report one-line pass/fail per call, with username/email for get_user and version for get_server_info. Do **not** look at `$GALAXY_URL` or `$GALAXY_API_KEY` in your own shell — the MCP server already has them and that is what you are testing.
 
 4. **On failure.** If the smoke test fails with auth/401, tell the user: "Your `GALAXY_API_KEY` looks wrong or expired. Update it in your shell export or in your `.env` (using your own editor), then run `/mcp` to reconnect the `galaxy` server and re-run `/galaxy:galaxy-setup`." Do **not** offer to read or edit the `.env` for them.

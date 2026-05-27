@@ -1,16 +1,17 @@
 ---
-description: Execute a multi-step Galaxy protocol end-to-end (a paper methods section, vendor handbook, pasted SOP, or written analysis plan) with checkpoints between phases. CRITICAL: When passing arguments to this command, do NOT summarize or normalize genome assemblies (e.g. do not reduce 'latest GRCh38' to 'hg38'). Pass the exact text or file path so the subagent can parse exact constraints.
+name: galaxy-run-protocol
+description: Execute a multi-step Galaxy protocol end-to-end (a paper methods section, vendor handbook, pasted SOP, or written analysis plan) with checkpoints between phases. CRITICAL: When passing arguments to this command, do NOT summarize or normalize genome assemblies (e.g. do not reduce 'latest GRCm38' to 'mm10'). Pass the exact text or file path so the subagent can parse exact constraints.
 argument-hint: "[path to protocol markdown, OR pasted text]"
+disable-model-invocation: true
+context: fork
+agent: galaxy-operator
 ---
 
-Spawn the `galaxy-operator` subagent with this brief:
-
-<brief>
 Execute a procedural Galaxy protocol end-to-end.
 
 1. Acquire the protocol:
    - If `$ARGUMENTS` names a file, read it via the `Read` tool.
-   - Otherwise, the protocol text was pasted into the parent's conversation — if it's not in your context, ask the parent (in your return summary) to re-paste it.
+   - Otherwise, the protocol text is in `$ARGUMENTS`.
 2. Parse the protocol into discrete phases. A phase is one logical unit of work (e.g., "create history", "upload reference + reads", "QC", "primary tool", "summarize"). Keep phases small enough that a single failure doesn't waste an hour.
 3. Plan: enumerate the phases as a numbered list in your first message back to the parent. Include each phase's expected tools, any quality gates the protocol specifies (e.g., "abort if alignment < 70%", "skip samples with < 1M reads"), and the expected outputs.
 4. Execute phase by phase:
@@ -24,6 +25,3 @@ Execute a procedural Galaxy protocol end-to-end.
 6. Return a concise summary: per-phase one-liner with key numbers, list of locally downloaded files, any anomalies. Surface a public share URL only if publishing was authorized.
 
 Do NOT hardcode any parameters from the protocol into your own defaults. The protocol supplies thresholds, tool choices, parameters, reference build; you supply the execution discipline.
-</brief>
-
-Return the subagent's final report to me.

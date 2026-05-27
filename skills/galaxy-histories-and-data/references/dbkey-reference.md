@@ -12,22 +12,22 @@ Choosing the incorrect genome assembly is a catastrophic failure. It results in 
 
 Users often use natural language to request specific variations of a genome, such as **"latest"**, **"patched"**, or specific version numbers (e.g., **"p11"**, **"patch 14"**).
 
-**You must NEVER eagerly normalize or strip these modifiers when planning, summarizing, or delegating tasks to subagents.** ### The `hg38` vs `hg38Patch11` Failure Mode
-If a user instruction says: *"Run Bowtie2 against the latest human GRCh38 assembly"*, do **NOT** map this to the base `hg38` (e.g., `Human Dec. 2013 (GRCh38/hg38)(hg38)`).
+**You must NEVER eagerly normalize or strip these modifiers when planning, summarizing, or delegating tasks to subagents.** ### The `mm10` vs `mm10Patch6` Failure Mode
+If a user instruction says: *"Run Bowtie2 against the latest mouse GRCm38 assembly"*, do **NOT** map this to the base `mm10` (e.g., `Mouse Dec. 2011 (GRCm38/mm10)(mm10)`).
 
-You must recognize the word "latest" and dynamically search the tool's available options to find the most recent patch, such as `GRCh38.p11 Jun. 2017 (hg38Patch11)`.
+You must recognize the word "latest" and dynamically search the tool's available options to find the most recent patch, such as `GRCm38.p6 (mm10Patch6)`.
 
 ### Rules for Handling Natural Language Genome Requests:
 
-1. **Preserve Modifiers in Delegation:** When a parent agent spawns a subagent (e.g., `galaxy-operator`), the prompt must retain exact quotes of the user's genome requirements (e.g., "Use the latest GRCh38 patch"). Do not reduce it to "Use genome GRCh38".
+1. **Preserve Modifiers in Delegation:** When a parent agent spawns a subagent (e.g., `galaxy-operator`), the prompt must retain exact quotes of the user's genome requirements (e.g., "Use the latest GRCm38 patch"). Do not reduce it to "Use genome GRCm38".
 2. **Dynamic Lookups for Specificity:** If the prompt contains modifiers like "latest", "newest", "Patch X", "pX", or specific release years, you must query the aligner's `reference_genome` options via `get_tool_details(<tool_id>, io_details=True)` or `jq` (as described in `efficient-discovery.md`).
-3. **Parse Tool Options Carefully:** Look at the exact strings returned by Galaxy (e.g., `hg38Patch11` vs `hg38`). Select the one that satisfies the user's chronological or patch-specific constraints.
+3. **Parse Tool Options Carefully:** Look at the exact strings returned by Galaxy (e.g., `mm10Patch6` vs `mm10`). Select the one that satisfies the user's chronological or patch-specific constraints.
 
 ---
 
 ## Fallback: Generic dbkey Values
 
-**ONLY** use the following table if the user pastes a generic protocol that names a genome (e.g., "hg38", "human reference") with **absolutely no** version constraints, patch numbers, or chronological modifiers (like "latest").
+**ONLY** use the following table if the user pastes a generic protocol that names a genome (e.g., "mm10", "mouse reference") with **absolutely no** version constraints, patch numbers, or chronological modifiers (like "latest").
 
 | Organism | Build | Generic dbkey Fallback |
 | --- | --- | --- |

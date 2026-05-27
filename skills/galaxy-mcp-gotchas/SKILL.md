@@ -6,12 +6,7 @@ disable-model-invocation: true
 
 # Galaxy MCP Gotchas
 
-The Galaxy MCP server's default failure mode is **silent**: a malformed input dict makes the tool run with defaults, produce an empty or wrong output, and report job state `ok`. Treating job status as evidence of success is the single biggest mistake. Always verify output **contents**.
-
-This skill is the debug checklist. When something looks off, walk through the sections in order — most real-world failures are one of the first four.
-
-## When to use
-
+<when_to_use>
 - "The job ran but the output is empty / wrong / smaller than expected"
 - "`get_history_contents` returned nothing but the UI shows datasets"
 - "I'm getting a wrong-format error / a values-wrapper error"
@@ -19,118 +14,48 @@ This skill is the debug checklist. When something looks off, walk through the se
 - "I have a hid number from the UI but the API doesn't accept it"
 - Connection or auth errors on the first call after launching
 
-**Not for**: routine tool execution (use `galaxy-tool-execution`), routine history navigation (use `galaxy-histories-and-data`).
+Not for:
+- Routine tool execution (use `galaxy-tool-execution`)
+- Routine history navigation (use `galaxy-histories-and-data`)
+</when_to_use>
 
-## 1. Verify outputs by contents, not by job state
+<instructions>
+The Galaxy MCP server's default failure mode is SILENT: malformed input dicts run with defaults, produce empty outputs, but report `state: ok`. Walk through these checks when debugging:
 
-`get_job_details(dataset_id)` returning `state: ok` does **not** mean the tool did what you asked. A malformed input often runs the tool with defaults. After any non-trivial `run_tool`:
+1. Verify outputs by contents, not by job state
+Always preview contents: `get_dataset_details(dataset_id, include_preview=True, preview_lines=15)`. If empty/wrong format, the input dict was wrong. Reread schema and examples.
 
-```
-get_dataset_details(dataset_id, include_preview=True, preview_lines=15)
-```
+2. Conditional parameters use pipe notation
+Do NOT nest `<conditional>` elements. Use `parent|child` keys:
+`{"how|how_filter": "remove_if_absent"}` (Correct)
+`{"how": {"how_filter": "remove_if_absent"}}` (Silent failure)
 
-If the preview is empty, suspiciously small, or doesn't look like the expected output format → input dict was wrong. Reread `get_tool_details(tool_id, io_details=True)` and `get_tool_run_examples(tool_id)`.
+3. Data inputs often require a `values` wrapper
+Many collection ops (`__FILTER_FROM_FILE__`, `__TAG_FROM_FILE__`) ignore bare references. Wrap them:
+`{"values": [{"src": "hdca", "id": collection_id}]}`
 
-## 2. Conditional parameters use pipe notation, not nesting
+4. Dataset `id` vs `hid`
+Use `id` (hex hash) for API calls. If the user provides `hid` (small integer, e.g., `42`), look it up via `get_history_contents` with `order="hid-dsc"` first.
 
-Galaxy tool XML uses `<conditional>` elements; the MCP serializes these with `parent|child` keys. Nesting the child in a sub-object is silently ignored.
+5. Empty `get_history_contents`
+The default hides hidden/deleted items. Toggle them to see intermediate workflow outputs:
+`get_history_contents(history_id=H, deleted=True, visible=False, limit=200)`
 
-```python
-# WRONG — nested object is ignored, defaults are used
-inputs = {
-    "how": {
-        "how_filter": "remove_if_absent",
-        "filter_source": {"src": "hda", "id": file_id},
-    },
-}
+6. Empty / wrong-format upload
+`upload_file_from_url` requires `file_type` and `dbkey` (e.g., `"mm10"`) for genomic files. Otherwise, downstream tools refuse the input.
 
-# CORRECT — pipe notation
-inputs = {
-    "how|how_filter": "remove_if_absent",
-    "how|filter_source": {"src": "hda", "id": file_id},
-}
-```
+7. Connection hanging/404
+Check if `GALAXY_URL` has a trailing slash (`https://usegalaxy.org/`).
 
-This is the most frequent silent-failure cause across all collection and filter tools.
-
-## 3. Many tools require a `values` wrapper around dataset/collection refs
-
-A bare `{"src": "hdca", "id": ...}` is accepted by some tools and silently ignored by others (notably `__FILTER_FROM_FILE__`, `__TAG_FROM_FILE__`, `__RELABEL_FROM_FILE__`, and most other collection ops). When in doubt, wrap:
-
-```python
-# Bare reference — fine for run_tool on most analysis tools
-{"src": "hda", "id": dataset_id}
-
-# Wrapped — required for filter/tag/relabel collection ops
-{"values": [{"src": "hdca", "id": collection_id}]}
-```
-
-If a collection tool produced an empty output, add the wrapper and retry.
-
-## 4. Dataset `id` vs `hid` — always use `id`
-
-- `hid` is the small integer Galaxy shows in the UI (e.g., `42`). It is **not** an API identifier.
-- `id` is the hex hash (`f9cad7b01a472135…`). Every MCP call wants this.
-
-If you have only an `hid`, look it up via `get_history_contents(history_id=..., order="hid-dsc")` and find the matching element.
-
-## 5. Empty `get_history_contents` — toggle `visible` and `deleted`
-
-By default, the call returns only **visible, non-deleted** datasets. If the UI shows items but the API returns none, the items are hidden (common for intermediate workflow outputs) or marked deleted:
-
-```python
-get_history_contents(history_id="...", deleted=True, visible=False, limit=200)
-```
-
-## 6. Empty / wrong-format upload — set `file_type` and `dbkey`
-
-`upload_file_from_url` auto-detects format poorly. Always pass `file_type` (e.g., `"gtf"`, `"fastqsanger.gz"`, `"bed"`) and, for any genomic file, pass `dbkey` (e.g., `"hg38"`, `"mm10"`). Downstream tools (Bowtie2, htseq-count) refuse inputs whose dbkey doesn't match the reference.
-
-## 7. `GALAXY_URL` needs a trailing slash
-
-```
-Correct:  https://usegalaxy.org/
-May fail: https://usegalaxy.org
-```
-
-This bites freshly-configured environments. If the first `connect` call hangs or 404s, check the trailing slash.
-
-## 8. Large histories — paginate
-
-Don't request all datasets at once. `limit=100, offset=N` and iterate.
-
-## 9. Token-waste traps (efficiency, not correctness)
-
-These don't cause wrong answers — they bleed context. Worth knowing before you exhaust the window mid-pipeline.
-
-### 9a. `get_tool_details(io_details=True)` on tools with built-in reference indices
-
-Aligners (Bowtie2, BWA, HISAT2, STAR, minimap2), pseudo-aligners (Salmon, kallisto), and any tool whose `reference_genome` / `reference_source` parameter is a "Locally cached" select — the `options` array of that parameter lists every cached genome on the server. The response can exceed 500 KB and force a save-to-file detour with downstream `jq` calls just to find the actual input names.
-
-Fix: call `get_tool_run_examples` first; only fall through to `get_tool_details` when examples don't show what you need. If you must, use targeted `jq` queries on the saved file. Full recipe in `../galaxy-tool-execution/references/efficient-discovery.md`.
-
-### 9b. `search_tools_by_name` returns every cached version + near matches
-
-A search for a popular tool returns 8-22 hits (every version row plus unrelated tools that share the name). Take the top hit; don't enumerate. If too noisy, switch to `search_tools_by_keywords` with two specific terms.
-
-### 9c. `include_preview=True` in a polling loop
-
-`get_dataset_details(dataset_id=BAM, include_preview=True)` dumps the full `@SQ` header — every reference contig (~30 KB for hg38). On a 20-minute alignment polled every 30s, that's ~1.2 MB of context for nothing useful.
-
-Fix: poll with `include_preview=False`. Only set `True` once, after the state reaches `ok`, when you actually need to read the output.
-
-### 9d. Polling Galaxy via `curl` from Bash
-
-This *will not work* and wastes calls. The MCP server has the Galaxy credentials; the agent's shell does not see `GALAXY_URL` / `GALAXY_API_KEY` and won't get them by sourcing `.env` (which is also blocked as credential storage). Every `curl -H "x-api-key: $GALAXY_API_KEY" "${GALAXY_URL}api/..."` returns empty.
-
-Fix: poll via `get_dataset_details` (MCP). For long jobs, use `ScheduleWakeup` so you don't busy-loop. See `../galaxy-tool-execution/references/efficient-discovery.md` §3.
-
-### 9e. Re-fetching what you already have
-
-Schemas, tool ids, and dataset ids don't change mid-conversation. If you've already searched for a tool or inspected its schema this turn, reuse the result — don't re-call.
+8. Token-waste traps (Efficiency)
+- Do NOT use `io_details=True` on aligners. It dumps huge lists of genomes. Rely on `get_tool_run_examples` or targeted `jq` queries.
+- Do NOT enumerate all versions from `search_tools_by_name`. Take the top hit.
+- Do NOT use `include_preview=True` in a polling loop. It dumps huge headers on every poll.
+- Do NOT poll via `curl` from Bash. It lacks credentials. Use MCP and `ScheduleWakeup`.
+- Do NOT re-fetch schemas/IDs already retrieved this turn.
+</instructions>
 
 ## References
-
-- `../galaxy-tool-execution/references/efficient-discovery.md` — full recipes for the token-waste traps above.
-- `../galaxy-collections/references/apply-rules-dsl.md` — full Apply Rules DSL when you need it.
-- `../galaxy-tool-execution/references/input-dict-patterns.md` — exhaustive input dict patterns (batch, linked, map_over_type, repeats).
+- `../galaxy-tool-execution/references/efficient-discovery.md` — full recipes for token-waste traps.
+- `../galaxy-collections/references/apply-rules-dsl.md`
+- `../galaxy-tool-execution/references/input-dict-patterns.md`
