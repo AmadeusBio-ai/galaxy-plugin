@@ -2,6 +2,20 @@
 
 Always set `dbkey` on genomic uploads (FASTQ, BAM, BED, GTF, VCF). The `dbkey` determines tool compatibility.
 
+## Authoritative source: the per-history assembly registry
+
+Inside any protocol — and certainly any time another tool downstream will consume the upload's reference — the `dbkey` value is **owned by the per-history assembly registry**, not by this file. See `../../galaxy-tool-execution/references/assembly-resolution.md`. Read the registry first; only fall through to the table below in the explicit ad-hoc case described under "Fallback" at the bottom.
+
+```bash
+# Inside a protocol, before passing `dbkey=` to upload_file_from_url:
+node "$CLAUDE_PLUGIN_ROOT/bin/galaxy-assembly-registry.js" read \
+    --history-id "$HID" --build-family "$BUILD_FAMILY"
+# exit 0 -> use .assembly.upload_dbkey
+# exit 3 -> STOP, run Phase 0 first
+```
+
+If a registry hit exists, this file's fallback table is **forbidden**. The hg38/mm10/etc. rows below are the *generic, unversioned* builds; substituting them for a registry value (e.g. quietly using `hg38` when the registry holds `hg38Patch14`) is the exact catastrophic drift the registry was built to prevent.
+
 ## Core Directive: Dynamic Resolution
 
 **NEVER assume or hardcode standard dbkeys** (e.g., mapping "latest GRCh38" directly to `hg38`). Tool options dictate the available version patches.
@@ -41,8 +55,9 @@ Use this table **ONLY** for ad-hoc uploads where ALL of the following are true:
 
 * No consuming tool is known yet.
 * The user provided **NO** version modifiers ("latest", "patched", dates).
+* No per-history registry entry exists for the build family (`galaxy-assembly-registry read` exits 3 for this build).
 
-*If you are running a workflow or protocol, you are never in this fallback state.*
+*If you are running a workflow or protocol, you are never in this fallback state.* Likewise, if Phase 0 has already run for this history (registry has an `assemblies[]` entry for the build family), you are not in this fallback state for any subsequent step.
 
 | Organism | Build | Expected UI Label Prefix | Fallback `dbkey` |
 | --- | --- | --- | --- |

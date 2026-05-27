@@ -36,19 +36,39 @@ If full parameter tree is needed, use `jq` to slice the response.
 Always use `get_tool_run_examples(tool_id=TOOL)` as your template for exact pipe-notation and wrapper conventions.
 
 4. Run
-**Assembly assertion gate (mandatory)** — if `inputs` contains a `reference_genome|index`, a `genome`/`genomeSource` index parameter, or any other built-in reference picker tied to a Galaxy dbkey, you MUST emit the following block in your turn output *before* the `run_tool` call:
+**Assembly registry gate (mandatory)** — if `inputs` contains a `reference_genome|index`, a `genome`/`genomeSource` index parameter, or any other built-in reference picker tied to a Galaxy dbkey, you MUST go through the registry **before** calling `run_tool`. Full procedure: `references/assembly-resolution.md`. In brief:
+
+```bash
+# 1. Read the registry for this history + build family.
+node "$CLAUDE_PLUGIN_ROOT/bin/galaxy-assembly-registry.js" read \
+    --history-id "$HID" --build-family "$BUILD_FAMILY"
+# exit 3 -> STOP. Run Phase 0 resolution (assembly-resolution.md §4), then set-assembly, then retry.
+# exit 0 -> JSON gives .assembly.upload_dbkey + .assembly.tool_indexes[<TOOL>]
+```
+
+If `tool_indexes[<TOOL>]` is missing, resolve once for this tool (filter `get_tool_details(io_details=True)` options with `jq` by base build keyword, apply the same `rule_applied` stored in the registry), then write back:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/bin/galaxy-assembly-registry.js" add-tool-index \
+    --history-id "$HID" --build-family "$BUILD_FAMILY" \
+    --tool-id "$TOOL" --param "reference_genome|index" --option-value "$OPTION_VALUE"
+```
+
+Then emit the ASSEMBLY ASSERTION block before `run_tool`. The `Source:` line is mandatory — it makes transcripts auditable:
 
 ```
 ASSEMBLY ASSERTION
 - Protocol asks for: "<verbatim quote from the protocol text — no paraphrase>"
+- Source: registry [outputs/.galaxy-context/<history_id>.json]   (or: just-resolved (writing back now))
 - Galaxy candidates considered: <list of UI labels returned by jq from get_tool_details(io_details=True)>
-- Picked: "<full UI label>" (index value = "<dbkey/option id>")
+- Picked: "<full UI label>" (option_value = "<dbkey/option id>")
 - Why this satisfies the request: <one sentence — e.g., "highest patch number in candidates", "only option matching the literal label prefix">
 ```
 
 Rules:
-- Never skip this block. A missing block is itself a defect — stop and produce it.
-- The "Picked" value must come from the Galaxy option list, not the fallback table in `dbkey-reference.md` and not from training data. If the option list is empty for the species, stop and ask the user.
+- Never skip this block. A missing block, or a `Source:` of "memory"/"training data"/"fallback table", is itself a defect — stop and fix it.
+- The "Picked" `option_value` must come from the registry (`tool_indexes[<TOOL>].option_value`) or, if it was just resolved this turn, from the live Galaxy option list **and** must be written back via `add-tool-index` before `run_tool`. Never from `dbkey-reference.md` and never from training data.
+- If the option list is empty for the species, stop and ask the user.
 
 Then invoke `run_tool(history_id=H, tool_id=TOOL, inputs=INPUTS)`. Save dataset IDs immediately.
 
@@ -95,7 +115,7 @@ preview = get_dataset_details(dataset_id=output_id, include_preview=True, previe
 </example>
 
 ## References
-* `references/assembly-resolution.md` — **Mandatory** procedure for picking a reference genome / dbkey. Read whenever the task involves an aligner or any built-in reference picker.
+* `references/assembly-resolution.md` — **Canonical**. Per-history registry path + schema, the three gates (Gate A on uploads, Gate B on reference-touching tools, Gate C on write-back), Phase 0 resolution rules, ASSEMBLY ASSERTION block. Read whenever the task involves an aligner or any built-in reference picker; conflicts with other docs are decided here.
 * `references/efficient-discovery.md` — Token-cost tactics for schemas and searches.
 * `references/input-dict-patterns.md` — Full input dict catalog (batch, conditionals).
 * `references/job-states.md` — State machine and polling cadence.
