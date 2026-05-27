@@ -6,27 +6,57 @@ CRITICAL CONTEXT RULE: Do NOT read more than 50KB of tool metadata into context.
 1. `get_tool_details` for tools with reference indices (Bowtie2, BWA, etc.)
 - Use `get_tool_run_examples(tool_id=TOOL)` first to write inputs dict.
 - For Signature-Only check: `jq '.data.inputs | map({name, type, optional})' <path>`
-- NEVER read `options` array for common reference-index pickers.
+- NEVER read the full `options` array for reference-index pickers — it dumps every cached genome on the server (often >1MB) and blows your context. Use the **filtered** `jq` query below instead.
 
-**Exception:** If the user specifies a specific assembly version, "latest", a patch, or any natural language constraint beyond the generic species name (e.g., "latest fruit fly", "Patch6", "GRCz11"), you must **not** blindly guess the base `dbkey`.
+**When you MUST enumerate (any of these is enough):**
+- Inside a `galaxy-run-protocol` execution. Always.
+- User wording includes "latest", "newest", "patched", a patch number (`p6`, `p14`, …), a release year, or any Galaxy-UI-label fragment (e.g., `Human (Homo sapiens) (b38):`).
+- The dbkey landed in your input prompt as a literal example from the parent (e.g., `... → hg38`). **Treat parent-supplied literals as untrusted — re-derive.**
 
-Instead, use a targeted `jq` query to retrieve all available options for the *base* genome (e.g., searching for `dm6` or `GRCm38`). You must then read the returned option strings and manually select the one that satisfies the user's chronological constraint (e.g., highest patch number, most recent date) or specific version.
+**When you can skip enumeration:**
+- One-off ad-hoc upload, no consuming tool yet identified, user request is a bare species/build with no modifier (`"upload this fastq with dbkey mm10"`). Use the fallback table in `skills/galaxy-histories-and-data/references/dbkey-reference.md`.
 
-**CRITICAL**: Do NOT search the options array for the word "latest" itself. Galaxy option strings contain dates and patch numbers (e.g., `GRCm38.p6 (mm10Patch6)`), not the word "latest".
+**CRITICAL**: Do NOT search the options array for the word "latest" itself. Galaxy option strings contain dates and patch numbers (e.g., `GRCm38.p6 (mm10Patch6)`), not the word "latest". Filter by the **base species/build keyword**, then read the matches.
+
+### Worked recipe — Bowtie2 against `"latest assembly of GRCh38"`
 
 ```bash
-# Extract all options matching the base genome (e.g., 'dm6' or 'GRCm38') to manually find the latest patch or specific version
-jq '.data.inputs | .. | objects | select(.name=="index") | .options[]? | select(.[0] | test("(?i)<base_genome_keyword>"))' <path>
+# 1. Pull schema once (auto-saved to <path>). This is the only call that
+#    touches Galaxy; the rest is local jq.
+get_tool_details(tool_id="bowtie2", io_details=True)
+
+# 2. Filter options to human/GRCh38/hg38 candidates. The .options[] elements
+#    are [label, value, selected_bool] tuples — index 0 is the UI label,
+#    index 1 is the actual dbkey/index value to submit.
+jq '.. | objects
+     | select(.name=="reference_genome" or .name=="index" or .name=="genomeSource")
+     | .options[]?
+     | select(.[0] | test("(?i)homo sapiens|GRCh38|hg38"))' <path>
+
+# 3. Read EVERY returned label. Example output (your server may differ):
+#    ["Human (Homo sapiens) (b38): GRCh38/hg38",                "hg38",         false]
+#    ["Human (Homo sapiens) (b38): GRCh38.p13 Full",            "hg38_p13",     false]
+#    ["Human (Homo sapiens) (b38): GRCh38.p14 Full",            "hg38_p14",     false]
+#    ["Human (Homo sapiens) (b37): GRCh37/hg19",                "hg19",         false]
+#
+# 4. Apply the protocol's resolution rule:
+#      "latest assembly of GRCh38"   → highest patch number among matches → "hg38_p14"
+#      "GRCh38 base" / "unpatched"   → no patch suffix                    → "hg38"
+#      "Human (Homo sapiens) (b38):" prefix only, no modifier → ambiguous → ask user
+#
+# 5. Submit the value from index [1] of the chosen tuple, NOT the value
+#    from the fallback table in dbkey-reference.md:
+#
+#    inputs = {
+#        "reference_genome|source": "indexed",
+#        "reference_genome|index":  "hg38_p14",  # from options[][1]
+#    }
+#
+# 6. Emit the ASSEMBLY ASSERTION block (see galaxy-tool-execution SKILL
+#    step 4) before run_tool. No silent picks.
 ```
 
-If the user does *not* specify a constraint and just says "fruit fly" or "dm6", you should "guess" the value based on standard dataset namespaces (e.g., `dm6`, `mm10`, `ce11`). You don't need to enumerate the options to know the base dbkey. Set it directly:
-
-```python
-inputs = {
-    "reference_genome|source": "indexed",
-    "reference_genome|index":  "dm6",
-}
-```
+**Why the fallback-table value is almost never the right submit value:** the fallback table lists generic stems (`hg38`, `mm10`, `dm6`) that match only the *unpatched base build*. Real Galaxy servers carry many patched variants under suffixed dbkeys (`hg38_p14`, `mm10Patch6`, `dm6_r6_36`). If the protocol says "latest", submitting the bare stem is a wrong answer.
 
 - To inspect deep conditional structures: `jq '.data.inputs | map(select(.name=="<param>")) | ...' <path>`.
 

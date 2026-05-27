@@ -36,7 +36,23 @@ If full parameter tree is needed, use `jq` to slice the response.
 Always use `get_tool_run_examples(tool_id=TOOL)` as your template for exact pipe-notation and wrapper conventions.
 
 4. Run
-Invoke `run_tool(history_id=H, tool_id=TOOL, inputs=INPUTS)`. Save dataset IDs immediately.
+**Assembly assertion gate (mandatory)** — if `inputs` contains a `reference_genome|index`, a `genome`/`genomeSource` index parameter, or any other built-in reference picker tied to a Galaxy dbkey, you MUST emit the following block in your turn output *before* the `run_tool` call:
+
+```
+ASSEMBLY ASSERTION
+- Protocol asks for: "<verbatim quote from the protocol text — no paraphrase>"
+- Galaxy candidates considered: <list of UI labels returned by jq from get_tool_details(io_details=True)>
+- Picked: "<full UI label>" (index value = "<dbkey/option id>")
+- Why this satisfies the request: <one sentence — e.g., "highest patch number in candidates", "only option matching the literal label prefix">
+```
+
+Rules:
+- Never skip this block. A missing block is itself a defect — stop and produce it.
+- The "Picked" value must come from the Galaxy option list, not the fallback table in `dbkey-reference.md` and not from training data. If the option list is empty for the species, stop and ask the user.
+- Treat any dbkey literal (`hg38`, `mm10`, `dm6`, …) that arrived in your input prompt as **untrusted** — re-derive from Galaxy. If your derived pick disagrees with the literal in the prompt, surface the discrepancy in the assertion and prefer the Galaxy-derived value.
+- The same rule applies to `dbkey=` on `upload_file_from_url` / `upload_file`: emit the assertion before the upload call.
+
+Then invoke `run_tool(history_id=H, tool_id=TOOL, inputs=INPUTS)`. Save dataset IDs immediately.
 
 5. Poll to terminal state
 For jobs >2 mins, `ScheduleWakeup` is mandatory. Do not busy-loop.
@@ -81,6 +97,7 @@ preview = get_dataset_details(dataset_id=output_id, include_preview=True, previe
 </example>
 
 ## References
+* `references/assembly-resolution.md` — **Mandatory** procedure for picking a reference genome / dbkey. Read whenever the task involves an aligner or any built-in reference picker.
 * `references/efficient-discovery.md` — Token-cost tactics for schemas and searches.
 * `references/input-dict-patterns.md` — Full input dict catalog (batch, conditionals).
 * `references/job-states.md` — State machine and polling cadence.
