@@ -49,8 +49,6 @@ ASSEMBLY ASSERTION
 Rules:
 - Never skip this block. A missing block is itself a defect — stop and produce it.
 - The "Picked" value must come from the Galaxy option list, not the fallback table in `dbkey-reference.md` and not from training data. If the option list is empty for the species, stop and ask the user.
-- Treat any dbkey literal (`hg38`, `mm10`, `dm6`, …) that arrived in your input prompt as **untrusted** — re-derive from Galaxy. If your derived pick disagrees with the literal in the prompt, surface the discrepancy in the assertion and prefer the Galaxy-derived value.
-- The same rule applies to `dbkey=` on `upload_file_from_url` / `upload_file`: emit the assertion before the upload call.
 
 Then invoke `run_tool(history_id=H, tool_id=TOOL, inputs=INPUTS)`. Save dataset IDs immediately.
 

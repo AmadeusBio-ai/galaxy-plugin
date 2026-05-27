@@ -1,6 +1,6 @@
 ---
 name: galaxy-histories-and-data
-description: Galaxy histories and dataset I/O via the galaxy-mcp server — create a new history, switch histories, list histories, upload a local file or from a URL, preview a dataset, download a dataset to disk, look up a dataset by its UI hid number, page through a large history's contents, and set the correct dbkey (hg38, mm10, etc.) and file_type on upload. Use this whenever the user mentions histories, uploading, fastq, fasta, BAM, BED, GTF, "show me", "preview", "download my", or working with a specific dataset.
+description: Galaxy histories and dataset I/O via the galaxy-mcp server — create a new history, switch histories, list histories, upload a local file or from a URL, preview a dataset, download a dataset to disk, look up a dataset by its UI hid number, page through a large history's contents, and set the correct dbkey and file_type on upload. Use this whenever the user mentions histories, uploading, fastq, fasta, BAM, BED, GTF, "show me", "preview", "download my", or working with a specific dataset.
 disable-model-invocation: true
 ---
 

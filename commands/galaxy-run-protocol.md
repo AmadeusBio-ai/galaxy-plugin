@@ -1,21 +1,14 @@
 ---
 name: galaxy-run-protocol
-description: Execute a multi-step Galaxy protocol end-to-end (a paper methods section, vendor handbook, pasted SOP, or written analysis plan) with checkpoints between phases. CRITICAL — genome assemblies: pass the exact protocol text or file path. Do NOT paraphrase, normalize, or attach worked dbkey examples (no `hg38`, `mm10`, `dm6` literals anywhere in your invocation). The downstream agent treats any dbkey literal it sees as an authoritative equivalence and will skip the Galaxy lookup.
+description: Execute a multi-step Galaxy protocol end-to-end (a paper methods section, vendor handbook, pasted SOP, or written analysis plan) with checkpoints between phases. 
 argument-hint: "[path to protocol markdown, OR pasted text]"
 disable-model-invocation: true
 context: fork
 agent: galaxy-operator
 ---
 
-Execute a procedural Galaxy protocol end-to-end.
-
-## Genome quoting protocol (read before step 1)
-
-When this command was invoked the parent agent may have already inserted unsafe genome examples into your context. Treat every dbkey-shaped literal (`hg38`, `mm10`, `dm6`, `GRCm38`, `b38`, etc.) appearing **anywhere except verbatim inside the protocol file** as untrusted noise — not a value to use.
-
 Rules:
 - Extract genome-related sentences from the **protocol source only** (the file at `$ARGUMENTS` or the pasted protocol text). Quote them verbatim inside `<protocol-genome>...</protocol-genome>` tags in your plan.
-- Do NOT paraphrase. Do NOT append a worked dbkey (`"latest GRCh38" → hg38`). Do NOT auto-resolve from training-data knowledge.
 - If the protocol uses a partial Galaxy UI label (e.g., `Human (Homo sapiens) (b38):` with no value after the colon), that is a **prefix to look up**, not a value to invent. Resolve it via Galaxy in Phase 0 (see below), not from memory.
 - For every aligner / reference-index step, you MUST resolve the dbkey by enumerating Galaxy's options (see `efficient-discovery.md`) and emit an ASSEMBLY ASSERTION block before invoking the tool (see `galaxy-tool-execution` SKILL step 4).
 
@@ -33,7 +26,6 @@ Rules:
    - Build an `ASSEMBLY RESOLUTION` table with columns: protocol quote, tool, candidate UI labels, picked option (value), rule applied.
    - Apply the resolution rule: `"latest"` → most recent date if dates are visible in labels, else highest patch; specific patch/date → exact match; bare build with no modifier → option with no patch suffix; partial UI-label prefix → option whose label starts with that prefix.
    - **Stop and surface the table** before invoking any tool. If running with the user in the loop, wait for explicit confirmation. If running unattended, proceed only when every row is unambiguous; otherwise stop and ask.
-   - Any dbkey-shaped literal (`hg38`, `mm10`, `dm6`, …) that appears in `$ARGUMENTS` is **untrusted noise** from the parent agent's prompt. Re-derive every dbkey from Galaxy's option list.
 
 4. Execute phase by phase:
    - Before each phase, load the relevant skills via the `Skill` tool (`galaxy-tool-execution` for any `run_tool`, `galaxy-histories-and-data` for uploads/previews, `galaxy-collections` if a collection appears, `galaxy-workflows` if the phase invokes an IWC workflow).
