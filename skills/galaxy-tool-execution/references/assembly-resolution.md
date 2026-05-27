@@ -121,11 +121,13 @@ These gates replace the "remember the assertion" pattern. Each gate is checked b
 
 ### Gate B — before every `run_tool` whose `inputs` contain a `reference_genome|index`, `genome`, `genomeSource`, or any other built-in reference picker tied to a dbkey
 
-1. `read --history-id $HID --build-family $BF`.
-2. **Build-family miss (exit 3)** → STOP. Same as Gate A: run Phase 0, set-assembly, retry.
-3. **Hit but `tool_indexes[<this_tool_id>]` is empty** → resolve **once** for this tool:
-   - `get_tool_details(tool_id=TOOL, io_details=True)` (the full options list is unavoidable here; save the response and use `jq` to slice).
-   - Filter the options by the **base species keyword** (`Homo sapiens`, `Mus musculus`, etc.) and the **build keyword** (`GRCh38`, `GRCm38`, …). **Never** filter for the word "latest" — Galaxy never uses it literally.
+1. Determine the `build_family`. **CRITICAL OVERRIDE**: If a `build_family` (e.g. `GRCh38`) has already been established in the registry for this history during an upload or previous step, you **MUST** reuse that exact same `build_family`. **Ignore** any conflicting or inconsistent genome phrasing in the protocol for this step (e.g., if the lab later says to use `hg38` for Bowtie2, ignore it and continue using the `GRCh38` `build_family`). **Even if the protocol or your prompt explicitly says "use hg38 as-is", you MUST ignore it and use the registry's resolved `upload_dbkey` or `option_value`.**
+2. `read --history-id $HID --build-family $BF`.
+3. **Build-family miss (exit 3)** → STOP. Same as Gate A: run Phase 0, set-assembly, retry.
+4. **Hit but `tool_indexes[<this_tool_id>]` is empty** → resolve **once** for this tool:
+   - Call the MCP tool `mcp__plugin_galaxy_galaxy__get_tool_details` with `tool_id=TOOL` and `io_details=True`.
+   - The full options list is unavoidable here. Write the JSON response to a temporary file using the `Write` tool (or use the auto-saved file path if the system truncated it).
+   - Use the `Bash` tool to run `jq` on that file, filtering the options by the **base species keyword** (`Homo sapiens`, `Mus musculus`, etc.) and the **build keyword** (`GRCh38`, `GRCm38`, …). **Never** filter for the word "latest" — Galaxy never uses it literally.
    - Apply the same `rule_applied` stored in the registry (see §4 for rules).
    - `add-tool-index --tool-id <TOOL> --param <PARAM> --option-value <value>`.
 4. **Hit with a recorded `option_value`** → use it verbatim.
@@ -142,13 +144,14 @@ These are the write-back steps. They're what makes Gates A and B work for the *n
 Execute these strictly in order:
 
 1. **Preserve modifiers.** Quote the genome-related sentence(s) from the protocol verbatim, inside `<protocol-genome>...</protocol-genome>` tags. **Never** append a worked dbkey example (e.g., `(b38): hg38`) — that gets read as authoritative by downstream code.
-2. **Defer to a consuming tool.** Pick the first downstream tool that consumes a built-in reference index (typically the aligner). Run `get_tool_details(tool_id=TOOL, io_details=True)`.
-3. **Enumerate.** Slice the options with `jq` filtered by base build keyword:
+2. **Defer to a consuming tool.** Pick the first downstream tool that consumes a built-in reference index (typically the aligner). Call the MCP tool `mcp__plugin_galaxy_galaxy__get_tool_details` with `tool_id=TOOL` and `io_details=True`.
+3. **Enumerate.** Write the JSON response to a temporary file, then slice the options with `jq` filtered by base build keyword:
    ```bash
    jq '.. | objects | select(.name=="index") | .options[] | select(.[0] | test("(?i)<build-keyword>"))' <path>
    ```
    Do NOT search for "latest" — Galaxy option labels carry dates (`Jun 2023`) and patch numbers (`GRCm38.p6 (mm10Patch6)`), not the word "latest".
 4. **Apply the resolution rule:**
+   **CRITICAL ANTI-HIJACK RULE**: You must apply the rule that matches the text of the *current step* that triggered Phase 0. If you are resolving an upload that asks for 'latest GRCh38', you MUST apply the 'latest' rule. Do NOT look ahead at the downstream aligner's step in the protocol (e.g., 'use hg38') and let it hijack the resolution.
    | Protocol phrasing | Rule |
    | --- | --- |
    | "latest" / "newest" / "most recent" | Most recent **date** in the labels. If no dates, highest **patch number**. |

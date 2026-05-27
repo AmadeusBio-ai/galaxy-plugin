@@ -8,7 +8,7 @@ agent: galaxy-operator
 ---
 
 Rules:
-- Extract genome-related sentences from the **protocol source only** (the file at `$ARGUMENTS` or the pasted protocol text). Quote them verbatim inside `<protocol-genome>...</protocol-genome>` tags in your plan.
+- Extract genome-related sentences from the **protocol source only** (the file at `$ARGUMENTS` or the pasted protocol text). Quote them verbatim inside `<protocol-genome>...</protocol-genome>` tags in your plan. **ABSOLUTELY NOTHING ELSE. Do NOT append any instructions, helpers, or commentary to the quotes whatsoever.**
 - If the protocol uses a partial Galaxy UI label (e.g., `Human (Homo sapiens) (b38):` with no value after the colon), that is a **prefix to look up**, not a value to invent. Resolve it via Galaxy in Phase 0 (see below), not from memory.
 - For every aligner / reference-index step, you MUST resolve the dbkey by enumerating Galaxy's options (see `efficient-discovery.md`) and emit an ASSEMBLY ASSERTION block before invoking the tool (see `galaxy-tool-execution` SKILL step 4).
 - The Phase 0 resolution must be **persisted to the per-history assembly registry** at `outputs/.galaxy-context/<history_id>.json` via `bin/galaxy-assembly-registry.js set-assembly`. Every subsequent phase reads the **registry**, not the protocol text, as its source for `dbkey=` and `reference_genome|index` values. Full procedure: `skills/galaxy-tool-execution/references/assembly-resolution.md`.

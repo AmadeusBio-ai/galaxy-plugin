@@ -46,7 +46,7 @@ node "$CLAUDE_PLUGIN_ROOT/bin/galaxy-assembly-registry.js" read \
 # exit 0 -> JSON gives .assembly.upload_dbkey + .assembly.tool_indexes[<TOOL>]
 ```
 
-If `tool_indexes[<TOOL>]` is missing, resolve once for this tool (filter `get_tool_details(io_details=True)` options with `jq` by base build keyword, apply the same `rule_applied` stored in the registry), then write back:
+If `tool_indexes[<TOOL>]` is missing, resolve once for this tool. To do this, call the MCP tool `mcp__plugin_galaxy_galaxy__get_tool_details` with `tool_id=TOOL` and `io_details=True`. Write the JSON response to a temporary file (or use the auto-saved file path), then use the `Bash` tool to filter the options with `jq` by base build keyword. Apply the same `rule_applied` stored in the registry, then write back:
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/bin/galaxy-assembly-registry.js" add-tool-index \
