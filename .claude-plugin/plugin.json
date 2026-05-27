@@ -7,8 +7,8 @@
   "mcpServers": {
     "galaxy": {
       "type": "stdio",
-      "command": "${CLAUDE_PLUGIN_ROOT}/bin/galaxy-mcp-launcher.sh",
-      "args": []
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/galaxy-mcp-launcher.js"]
     }
   }
 }

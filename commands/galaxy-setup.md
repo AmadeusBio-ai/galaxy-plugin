@@ -11,19 +11,20 @@ Galaxy MCP setup verifier. **Critical security rules — follow these exactly:**
 
 Steps:
 
-1. **Detect state (no secret exposure).** Run exactly this Bash command and report the four lines verbatim:
+1. **Detect state (no secret exposure).** Run exactly this Node.js command and report the four lines verbatim:
 
    ```bash
-   bash -c '
-   echo "shell GALAXY_URL=${GALAXY_URL:-<unset>}";
-   if [[ -n "${GALAXY_API_KEY:-}" ]]; then
-     echo "shell GALAXY_API_KEY=<set (${#GALAXY_API_KEY} chars)>";
-   else
-     echo "shell GALAXY_API_KEY=<unset>";
-   fi;
-   [[ -f .galaxy.env ]] && echo "file .galaxy.env=present" || echo "file .galaxy.env=absent";
-   [[ -f .env ]] && echo "file .env=present" || echo "file .env=absent"
-   '
+   node -e "
+   console.log('shell GALAXY_URL=' + (process.env.GALAXY_URL || '<unset>'));
+   if (process.env.GALAXY_API_KEY) {
+     console.log('shell GALAXY_API_KEY=<set (' + process.env.GALAXY_API_KEY.length + ' chars)>');
+   } else {
+     console.log('shell GALAXY_API_KEY=<unset>');
+   }
+   const fs = require('fs');
+   console.log('file .galaxy.env=' + (fs.existsSync('.galaxy.env') ? 'present' : 'absent'));
+   console.log('file .env=' + (fs.existsSync('.env') ? 'present' : 'absent'));
+   "
    ```
 
 2. **Branch.**

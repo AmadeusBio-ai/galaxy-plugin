@@ -7,7 +7,7 @@ Turn Claude Code into a competent operator of the [Galaxy](https://usegalaxy.org
 - **`galaxy-operator` subagent** — a single specialist that owns all Galaxy work. Galaxy knowledge stays out of your main context until you ask for Galaxy work, so this plugin coexists cleanly with other bioinformatics plugins.
 - **6 reactive skills** covering tool execution, histories/data, collections, workflows, results reporting, and a dedicated debugging skill for the MCP server's silent-failure modes.
 - **5 slash commands** for the common high-leverage operations: `/galaxy-setup`, `/galaxy-status`, `/galaxy-publish`, `/galaxy-resume`, `/galaxy-run-protocol`.
-- A bundled MCP server entry wired to the published [`galaxy-mcp`](https://github.com/galaxyproject/galaxy-mcp) server via `uvx`, launched through `bin/galaxy-mcp-launcher.sh` so credentials can come from either the shell or a persisted `.env`.
+- A bundled MCP server entry wired to the published [`galaxy-mcp`](https://github.com/galaxyproject/galaxy-mcp) server via `uvx`, launched through `bin/galaxy-mcp-launcher.js` so credentials can come from either the shell or a persisted `.env`.
 
 ## Prerequisites
 
