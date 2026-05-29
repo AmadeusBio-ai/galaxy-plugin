@@ -34,25 +34,8 @@ Local file: `upload_file(path="/path/to/sample.fastq.gz", history_id=H)`
 From URL: `upload_file_from_url(url="...", history_id=H, file_type="gtf", dbkey="dm6")`
 Always pass `file_type` and `dbkey` for genomic files.
 
-**Assembly registry gate (Gate A) — mandatory whenever you set `dbkey=`.**
-Read the per-history registry before passing `dbkey` so the value is consistent with every other step in this history:
-
-```bash
-node "$CLAUDE_PLUGIN_ROOT/bin/galaxy-assembly-registry.js" read \
-    --history-id "$HID" --build-family "$BUILD_FAMILY"
-# exit 3 -> STOP. Phase 0 has not run for this build family. Run resolution
-#          (see galaxy-tool-execution/references/assembly-resolution.md §4) and
-#          `set-assembly` before retrying the upload.
-# exit 0 -> use .assembly.upload_dbkey verbatim as the dbkey argument.
-```
-
-After the upload reaches `ok`, record the dataset back to the registry so later steps can audit drift:
-
-```bash
-node "$CLAUDE_PLUGIN_ROOT/bin/galaxy-assembly-registry.js" add-upload \
-    --history-id "$HID" --dataset-id "$DSID" --name "genes.gtf" \
-    --dbkey "$DBKEY" --build-family "$BUILD_FAMILY"
-```
+**dbkey on upload — honor the protocol's version constraint.**
+If the protocol names a plain build (e.g. "dm6", "human reference") with no version modifier, use the generic value from `references/dbkey-reference.md`. If it carries any constraint ("latest", "newest", a patch like `p14`, a date, or a partial UI-label prefix), do **not** normalize to the base build — resolve it against Galaxy's live option list on the consuming tool (`get_tool_details(io_details=True)` + `jq`, see `../galaxy-tool-execution/references/efficient-discovery.md`) and use that value as the `dbkey`. Quote the constraint verbatim; never silently reduce "latest GRCh38" to `hg38`.
 
 Wait for the upload job to reach `ok` before using the dataset in tools.
 
@@ -71,7 +54,7 @@ Always preview after a tool runs (`state: ok` doesn't mean correctness), but use
 Omit `file_path` to load into memory instead.
 
 Critical Patterns:
-- Pass `dbkey` and `file_type` on every upload to avoid silent downstream failures. The `dbkey` value MUST come from the per-history registry whenever a Phase 0 resolution exists (see Gate A above and `../galaxy-tool-execution/references/assembly-resolution.md`). `references/dbkey-reference.md`'s fallback table is **only** for ad-hoc uploads with no consuming tool and no version modifier.
+- Pass `dbkey` and `file_type` on every upload to avoid silent downstream failures. When the protocol carries a version constraint, resolve the `dbkey` against Galaxy's live option list (see the dbkey note above). `references/dbkey-reference.md`'s fallback table is **only** for uploads with no version modifier.
 - Use `id` (hex hash) for MCP calls, not `hid` (UI number). Look up `hid` first if provided by user.
 </instructions>
 
@@ -103,6 +86,5 @@ get_dataset_details(dataset_id=reads_id, include_preview=True, preview_lines=4)
 </example>
 
 ## References
-- `../galaxy-tool-execution/references/assembly-resolution.md` — **canonical** for any `dbkey` decision. Per-history registry, Gate A/B/C, Phase 0 resolution rules.
-- `references/dbkey-reference.md` — fallback dbkey table for **ad-hoc** uploads only (no consuming tool, no version modifier).
+- `references/dbkey-reference.md` — dynamic dbkey resolution rules and the generic fallback table (the latter only for uploads with no version modifier).
 - `references/dataset-retrieval.md` — pagination patterns, hidden/deleted toggles.

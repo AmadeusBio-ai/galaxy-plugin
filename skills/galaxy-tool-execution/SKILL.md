@@ -36,38 +36,25 @@ If full parameter tree is needed, use `jq` to slice the response.
 Always use `get_tool_run_examples(tool_id=TOOL)` as your template for exact pipe-notation and wrapper conventions.
 
 4. Run
-**Assembly registry gate (mandatory)** — if `inputs` contains a `reference_genome|index`, a `genome`/`genomeSource` index parameter, or any other built-in reference picker tied to a Galaxy dbkey, you MUST go through the registry **before** calling `run_tool`. Full procedure: `references/assembly-resolution.md`. In brief:
+**Assembly resolution gate (mandatory)** — if `inputs` contains a `reference_genome|index`, a `genome`/`genomeSource` index parameter, or any other built-in reference picker tied to a Galaxy dbkey, resolve the build **from Galaxy's live option list** before calling `run_tool`. Do not pick a dbkey from memory, from `dbkey-reference.md`, or from a normalized base build.
 
-```bash
-# 1. Read the registry for this history + build family.
-node "$CLAUDE_PLUGIN_ROOT/bin/galaxy-assembly-registry.js" read \
-    --history-id "$HID" --build-family "$BUILD_FAMILY"
-# exit 3 -> STOP. Run Phase 0 resolution (assembly-resolution.md §4), then set-assembly, then retry.
-# exit 0 -> JSON gives .assembly.upload_dbkey + .assembly.tool_indexes[<TOOL>]
-```
+If the protocol carries any version constraint ("latest", "newest", a patch like `p14`, a date, or a partial UI-label prefix), enumerate the tool's options and pick the matching label yourself:
+- Call `get_tool_details(tool_id=TOOL, io_details=True)`, write the response to a temp file (or use the auto-saved path), then filter with `jq` by the **base species/build keyword** — never by the word "latest" (Galaxy uses dates and patch numbers, not that word). See `references/efficient-discovery.md`.
+- Apply the rule that matches the constraint's own wording: "latest"/"newest" → most recent date, else highest patch; specific patch/date → exact match; partial UI-label prefix → the unique option whose label starts with that prefix; bare build with no modifier → the option with no patch suffix.
 
-If `tool_indexes[<TOOL>]` is missing, resolve once for this tool. To do this, call the MCP tool `mcp__plugin_galaxy_galaxy__get_tool_details` with `tool_id=TOOL` and `io_details=True`. Write the JSON response to a temporary file (or use the auto-saved file path), then use the `Bash` tool to filter the options with `jq` by base build keyword. Apply the same `rule_applied` stored in the registry, then write back:
-
-```bash
-node "$CLAUDE_PLUGIN_ROOT/bin/galaxy-assembly-registry.js" add-tool-index \
-    --history-id "$HID" --build-family "$BUILD_FAMILY" \
-    --tool-id "$TOOL" --param "reference_genome|index" --option-value "$OPTION_VALUE"
-```
-
-Then emit the ASSEMBLY ASSERTION block before `run_tool`. The `Source:` line is mandatory — it makes transcripts auditable:
+Then emit the ASSEMBLY ASSERTION block before `run_tool`:
 
 ```
 ASSEMBLY ASSERTION
 - Protocol asks for: "<verbatim quote from the protocol text — no paraphrase>"
-- Source: registry [outputs/.galaxy-context/<history_id>.json]   (or: just-resolved (writing back now))
 - Galaxy candidates considered: <list of UI labels returned by jq from get_tool_details(io_details=True)>
 - Picked: "<full UI label>" (option_value = "<dbkey/option id>")
 - Why this satisfies the request: <one sentence — e.g., "highest patch number in candidates", "only option matching the literal label prefix">
 ```
 
 Rules:
-- Never skip this block. A missing block, or a `Source:` of "memory"/"training data"/"fallback table", is itself a defect — stop and fix it.
-- The "Picked" `option_value` must come from the registry (`tool_indexes[<TOOL>].option_value`) or, if it was just resolved this turn, from the live Galaxy option list **and** must be written back via `add-tool-index` before `run_tool`. Never from `dbkey-reference.md` and never from training data.
+- Never skip this block. A missing block, or a `Picked` value drawn from memory / training data / the `dbkey-reference.md` fallback table while a constraint exists, is itself a defect — stop and fix it.
+- The `Picked` value must come from Galaxy's live option list for **this tool** (a build's index value can differ across tool wrappers).
 - If the option list is empty for the species, stop and ask the user.
 
 Then invoke `run_tool(history_id=H, tool_id=TOOL, inputs=INPUTS)`. Save dataset IDs immediately.
@@ -115,7 +102,6 @@ preview = get_dataset_details(dataset_id=output_id, include_preview=True, previe
 </example>
 
 ## References
-* `references/assembly-resolution.md` — **Canonical**. Per-history registry path + schema, the three gates (Gate A on uploads, Gate B on reference-touching tools, Gate C on write-back), Phase 0 resolution rules, ASSEMBLY ASSERTION block. Read whenever the task involves an aligner or any built-in reference picker; conflicts with other docs are decided here.
-* `references/efficient-discovery.md` — Token-cost tactics for schemas and searches.
+* `references/efficient-discovery.md` — Token-cost tactics for schemas and searches, plus the `jq` recipe for enumerating a reference-index picker's options to satisfy a version constraint.
 * `references/input-dict-patterns.md` — Full input dict catalog (batch, conditionals).
 * `references/job-states.md` — State machine and polling cadence.
